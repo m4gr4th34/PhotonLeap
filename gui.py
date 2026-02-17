@@ -115,6 +115,14 @@ def parse_thickness(s):
     return float(s) if s else 0.0
 
 
+def parse_wavelength(s):
+    """Parse wavelength (nm). Default 587.6 (d-line)."""
+    s = (s or "").strip()
+    if not s:
+        return 587.6
+    return float(s)
+
+
 class OpticsAppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
         self.window.makeKeyAndOrderFront_(None)
@@ -174,8 +182,22 @@ def main():
 
         inputs.append((r_f, t_f, m_f))
 
+    # Wavelength input
+    wvl_y = height - margin - 6 * row_h
+    wvl_label = NSTextField.alloc().initWithFrame_(NSMakeRect(col1, wvl_y, 100, 20))
+    wvl_label.setStringValue_("Wavelength:")
+    wvl_label.setEditable_(False)
+    wvl_label.setBordered_(False)
+    wvl_label.setDrawsBackground_(False)
+    content.addSubview_(wvl_label)
+
+    wvl_field = NSTextField.alloc().initWithFrame_(NSMakeRect(col2, wvl_y, field_w, 20))
+    wvl_field.setPlaceholderString_("nm (e.g. 587.6)")
+    wvl_field.setStringValue_("587.6")
+    content.addSubview_(wvl_field)
+
     # Calculate button
-    btn_y = height - margin - 6 * row_h - 8
+    btn_y = height - margin - 7 * row_h - 8
     button = NSButton.alloc().initWithFrame_(NSMakeRect(col1, btn_y, 120, 28))
     button.setTitle_("Calculate")
     button.setBezelStyle_(4)  # NSRoundedBezelStyle
@@ -261,6 +283,17 @@ def main():
             c, t, n, v = surf_data_list[0]
             surf_data_list.append([-c if c != 0 else 0.0, 100.0, 1.0, 0.0])
 
+        # Parse wavelength (nm)
+        try:
+            wvl_nm = parse_wavelength(wvl_field.stringValue())
+            if wvl_nm <= 0 or wvl_nm > 2000:
+                raise ValueError("Wavelength must be between 1 and 2000 nm")
+        except Exception as e:
+            msg = "Invalid wavelength: {}.\n\nEnter wavelength in nm (e.g. 587.6 for d-line).".format(e)
+            _set_results_text(results_text, msg)
+            _debug("Invalid wavelength: " + str(e))
+            return
+
         # 2. Pass that data to the rayoptics function (lazy import for .app launch)
         _debug("About to import singlet_rayoptics")
         try:
@@ -313,7 +346,7 @@ def main():
             return
         _debug("About to run calculation")
         try:
-            output = calculate_and_format_results(surf_data_list)
+            output = calculate_and_format_results(surf_data_list, wvl_nm=wvl_nm)
             _debug("Calculation done, len=" + str(len(str(output))))
         except Exception as e:
             _debug("Calculation exception: " + str(e))

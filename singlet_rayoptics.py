@@ -105,6 +105,8 @@ def calculate_and_format_results(surf_data_list, wvl_nm=587.6):
     """
     lines = []
     try:
+        lines.append("Wavelength: {:.1f} nm".format(wvl_nm))
+        lines.append("")
         opt_model = build_singlet_from_surface_data(
             surf_data_list, wvl_nm=wvl_nm, radius_mode=False, object_distance=1e10
         )
