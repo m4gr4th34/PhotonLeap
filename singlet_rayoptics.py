@@ -12,7 +12,8 @@ from rayoptics.raytr import analyses
 
 
 def build_singlet_from_surface_data(surf_data_list, wvl_nm=587.6, radius_mode=False,
-                                    epd=None, object_distance=1e10):
+                                    epd=None, object_distance=1e10,
+                                    surface_diameters=None):
     """
     Build an OpticalModel for a singlet from a list of surface data.
 
@@ -22,6 +23,7 @@ def build_singlet_from_surface_data(surf_data_list, wvl_nm=587.6, radius_mode=Fa
     radius_mode: if True, surf_data_list uses radius instead of curvature.
     epd: entrance pupil diameter (mm). If None, taken from paraxial model later.
     object_distance: thickness of object gap (mm). Use large value for infinity.
+    surface_diameters: optional list of diameter (mm) per surface; sets aperture.
 
     Returns:
         opt_model: OpticalModel with seq_model built and parax_data updated.
@@ -35,6 +37,14 @@ def build_singlet_from_surface_data(surf_data_list, wvl_nm=587.6, radius_mode=Fa
     # Add each surface: [curvature, thickness, n, v] (or radius if radius_mode)
     for surf_data in surf_data_list:
         sm.add_surface(surf_data, wvl=wvl_nm)
+
+    # Set surface diameters (semi-diameter = diameter/2) if provided
+    if surface_diameters:
+        for i, d in enumerate(surface_diameters):
+            if d is not None and d > 0 and i + 1 < len(sm.ifcs):
+                sm.ifcs[i + 1].set_max_aperture(d / 2.0)
+        if epd is None and surface_diameters and surface_diameters[0] and surface_diameters[0] > 0:
+            epd = surface_diameters[0]
 
     # Stop at first real surface (index 1)
     sm.cur_surface = 1
@@ -97,10 +107,13 @@ def run_spot_diagram(opt_model, num_rays=21, fld=0, wvl=None, foc=0.0):
     return spot_xy, dxdy
 
 
-def calculate_and_format_results(surf_data_list, wvl_nm=587.6):
+def calculate_and_format_results(surf_data_list, wvl_nm=587.6, return_opt_model=False,
+                                 surface_diameters=None):
     """
     Build model from surface data, run analysis, return formatted result string.
     surf_data_list: list of [curvature, thickness, n, v] per surface.
+    return_opt_model: if True, return (result_string, opt_model); else result_string.
+    surface_diameters: optional list of diameter (mm) per surface.
     Returns multi-line string suitable for display in GUI.
     """
     lines = []
@@ -108,7 +121,8 @@ def calculate_and_format_results(surf_data_list, wvl_nm=587.6):
         lines.append("Wavelength: {:.1f} nm".format(wvl_nm))
         lines.append("")
         opt_model = build_singlet_from_surface_data(
-            surf_data_list, wvl_nm=wvl_nm, radius_mode=False, object_distance=1e10
+            surf_data_list, wvl_nm=wvl_nm, radius_mode=False, object_distance=1e10,
+            surface_diameters=surface_diameters
         )
         efl, fod = get_focal_length(opt_model)
         if efl is not None:
@@ -132,8 +146,24 @@ def calculate_and_format_results(surf_data_list, wvl_nm=587.6):
         result = "\n".join(lines)
         if not result.strip():
             result = "No results: focal length or spot data unavailable.\nCheck surface data (radius, thickness, material) and try 1–2 real surfaces."
+        if return_opt_model:
+            return result, opt_model
         return result
+    except ZeroDivisionError as e:
+        msg = (
+            "Division by zero: the optical configuration may be invalid.\n\n"
+            "Common causes:\n"
+            "• Afocal system (parallel in, parallel out)\n"
+            "• Zero or infinite focal length\n"
+            "• Use n=1 for air gaps between lenses (not n=2)\n\n"
+            "Check material values: air should be 1, glass typically 1.5–1.7."
+        )
+        if return_opt_model:
+            return msg, None
+        return msg
     except Exception as e:
+        if return_opt_model:
+            return "Error: " + str(e), None
         return "Error: " + str(e)
 
 

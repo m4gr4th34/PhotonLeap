@@ -2625,10 +2625,6 @@
    '/Users/irfanalikhan/Documents/Optics Experiment '
    '2026/MacOpticsApp/venv/lib/python3.9/site-packages/matplotlib/backends/backend_agg.py',
    'PYMODULE'),
-  ('matplotlib.backends.backend_macosx',
-   '/Users/irfanalikhan/Documents/Optics Experiment '
-   '2026/MacOpticsApp/venv/lib/python3.9/site-packages/matplotlib/backends/backend_macosx.py',
-   'PYMODULE'),
   ('matplotlib.backends.backend_qt',
    '/Users/irfanalikhan/Documents/Optics Experiment '
    '2026/MacOpticsApp/venv/lib/python3.9/site-packages/matplotlib/backends/backend_qt.py',
@@ -4453,6 +4449,10 @@
   ('opticalglass.util',
    '/Users/irfanalikhan/Documents/Optics Experiment '
    '2026/MacOpticsApp/venv/lib/python3.9/site-packages/opticalglass/util.py',
+   'PYMODULE'),
+  ('optics_visualization',
+   '/Users/irfanalikhan/Documents/Optics Experiment '
+   '2026/MacOpticsApp/optics_visualization.py',
    'PYMODULE'),
   ('optparse',
    '/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/optparse.py',

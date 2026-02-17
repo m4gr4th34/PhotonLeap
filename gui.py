@@ -7,14 +7,17 @@ Uses PyObjC (AppKit). Five surfaces: radius (mm), thickness (mm), material (n or
 import sys
 import os
 
-# When run as a frozen .app (e.g. PyInstaller), ensure script directory is on path
-# so lazy-import of singlet_rayoptics can find the module in the bundle.
+# Ensure script directory is on path so lazy-import finds singlet_rayoptics and optics_visualization.
 if getattr(sys, "frozen", False):
     app_dir = os.path.dirname(sys.executable)
     if hasattr(sys, "_MEIPASS"):
         app_dir = sys._MEIPASS
     if app_dir not in sys.path:
         sys.path.insert(0, app_dir)
+else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
 
 import objc
 from AppKit import (
@@ -24,6 +27,8 @@ from AppKit import (
     NSButton,
     NSScrollView,
     NSTextView,
+    NSImageView,
+    NSImage,
     NSMakeRect,
     NSWindowStyleMaskTitled,
     NSWindowStyleMaskClosable,
@@ -31,6 +36,10 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSFont,
     NSAlert,
+    NSViewWidthSizable,
+    NSViewHeightSizable,
+    NSViewMinYMargin,
+    NSViewMaxYMargin,
 )
 from Foundation import NSObject, NSString, NSRunLoop, NSDate
 
@@ -123,6 +132,14 @@ def parse_wavelength(s):
     return float(s)
 
 
+def parse_diameter(s):
+    """Parse diameter (mm). None if empty (use model default)."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    return float(s)
+
+
 class OpticsAppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
         self.window.makeKeyAndOrderFront_(None)
@@ -135,7 +152,7 @@ def main():
     app.setDelegate_(delegate)
 
     # Window
-    width, height = 560, 520
+    width, height = 800, 620
     window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
         ((100, 100), (width, height)),
         NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable,
@@ -153,11 +170,14 @@ def main():
     col2 = 120
     col3 = 220
     col4 = 320
-    col5 = 420
-    field_w = 90
-    material_w = 95
+    col5 = 410
+    col6 = 505
+    field_w = 85
+    material_w = 90
+    diam_w = 55
 
-    # Surface inputs (5 surfaces)
+    # Surface inputs (5 surfaces) - pinned to top on resize
+    top_pin = NSViewMinYMargin
     inputs = []
     for i in range(5):
         y = height - margin - (i + 1) * row_h
@@ -166,46 +186,58 @@ def main():
         label.setEditable_(False)
         label.setBordered_(False)
         label.setDrawsBackground_(False)
+        label.setAutoresizingMask_(top_pin)
         content.addSubview_(label)
 
         r_f = NSTextField.alloc().initWithFrame_(NSMakeRect(col2, y, field_w, 20))
         r_f.setPlaceholderString_("Radius (mm)")
+        r_f.setAutoresizingMask_(top_pin)
         content.addSubview_(r_f)
 
         t_f = NSTextField.alloc().initWithFrame_(NSMakeRect(col3, y, field_w, 20))
         t_f.setPlaceholderString_("Thickness (mm)")
+        t_f.setAutoresizingMask_(top_pin)
         content.addSubview_(t_f)
 
         m_f = NSTextField.alloc().initWithFrame_(NSMakeRect(col4, y, material_w, 20))
         m_f.setPlaceholderString_("n or n,V")
+        m_f.setAutoresizingMask_(top_pin)
         content.addSubview_(m_f)
 
-        inputs.append((r_f, t_f, m_f))
+        d_f = NSTextField.alloc().initWithFrame_(NSMakeRect(col5, y, diam_w, 20))
+        d_f.setPlaceholderString_("Diam (mm)")
+        d_f.setAutoresizingMask_(top_pin)
+        content.addSubview_(d_f)
 
-    # Wavelength input
+        inputs.append((r_f, t_f, m_f, d_f))
+
+    # Wavelength input - pinned to top
     wvl_y = height - margin - 6 * row_h
     wvl_label = NSTextField.alloc().initWithFrame_(NSMakeRect(col1, wvl_y, 100, 20))
     wvl_label.setStringValue_("Wavelength:")
     wvl_label.setEditable_(False)
     wvl_label.setBordered_(False)
     wvl_label.setDrawsBackground_(False)
+    wvl_label.setAutoresizingMask_(top_pin)
     content.addSubview_(wvl_label)
 
     wvl_field = NSTextField.alloc().initWithFrame_(NSMakeRect(col2, wvl_y, field_w, 20))
     wvl_field.setPlaceholderString_("nm (e.g. 587.6)")
     wvl_field.setStringValue_("587.6")
+    wvl_field.setAutoresizingMask_(top_pin)
     content.addSubview_(wvl_field)
 
-    # Calculate button
+    # Calculate button - pinned to top
     btn_y = height - margin - 7 * row_h - 8
     button = NSButton.alloc().initWithFrame_(NSMakeRect(col1, btn_y, 120, 28))
     button.setTitle_("Calculate")
     button.setBezelStyle_(4)  # NSRoundedBezelStyle
+    button.setAutoresizingMask_(top_pin)
 
-    # Results text area (scrollable)
-    results_y = margin + 40
-    results_h = btn_y - margin - 40
-    scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(margin, margin, width - 2 * margin, results_h))
+    # Results text area (scrollable) - fixed height, between button and visualization
+    results_h = 120
+    results_y = btn_y - 10 - results_h
+    scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(margin, results_y, width - 2 * margin, results_h))
     scroll.setHasVerticalScroller_(True)
     scroll.setHasHorizontalScroller_(False)
     scroll.setAutohidesScrollers_(True)
@@ -217,10 +249,24 @@ def main():
     results_text.setSelectable_(True)
     results_text.setFont_(NSFont.userFixedPitchFontOfSize_(12))
     results_text.setString_(NSString.stringWithString_(
-        "Enter surface data and click Calculate.\n\nRadius: mm (use 0 for flat).\nThickness: mm.\nMaterial: n or n,V (e.g. 1.5168,64.2 or 1 for air)."
+        "Enter surface data and click Calculate.\n\n"
+        "Radius: mm (use 0 for flat). Thickness: mm.\n"
+        "Material: n or n,V (e.g. 1.5168,64.2 or 1 for air).\n"
+        "Diam: mm (optional, surface diameter for ray trace and display).\n\n"
+        "The optical layout and ray trace will appear below."
     ))
     scroll.setDocumentView_(results_text)
+    scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
     content.addSubview_(scroll)
+
+    # Visualization image (optical layout + rays) - top fixed below results, grows down with window
+    viz_h = results_y - margin - 20
+    viz_y = margin
+    image_view = NSImageView.alloc().initWithFrame_(NSMakeRect(margin, viz_y, width - 2 * margin, viz_h))
+    image_view.setImageScaling_(1)  # NSImageScaleProportionallyUpOrDown
+    image_view.setImageFrameStyle_(1)  # NSImageFrameGrayBezel
+    image_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin)
+    content.addSubview_(image_view)
 
     content.addSubview_(button)
 
@@ -258,10 +304,12 @@ def main():
         # 1. Read inputs from the text fields (skip fully empty rows)
         _debug("Reading inputs")
         surf_data_list = []
-        for r_f, t_f, m_f in inputs:
+        surface_diameters = []
+        for r_f, t_f, m_f, d_f in inputs:
             radius_str = (r_f.stringValue() or "").strip()
             thickness_str = (t_f.stringValue() or "").strip()
             material_str = (m_f.stringValue() or "").strip()
+            diameter_str = (d_f.stringValue() or "").strip()
             if not radius_str and not thickness_str and not material_str:
                 continue
             try:
@@ -269,8 +317,9 @@ def main():
                 thickness = parse_thickness(thickness_str if thickness_str else "0")
                 n, v = parse_material(material_str if material_str else "1")
                 surf_data_list.append([curvature, thickness, n, v])
+                surface_diameters.append(parse_diameter(diameter_str))
             except Exception as e:
-                msg = "Invalid input: {}.\n\nCheck radius, thickness, and material (n or n,V).".format(e)
+                msg = "Invalid input: {}.\n\nCheck radius, thickness, material (n or n,V), and diameter.".format(e)
                 _set_results_text(results_text, msg)
                 _debug("Invalid input: " + str(e))
                 return
@@ -282,6 +331,7 @@ def main():
         if len(surf_data_list) == 1:
             c, t, n, v = surf_data_list[0]
             surf_data_list.append([-c if c != 0 else 0.0, 100.0, 1.0, 0.0])
+            surface_diameters.append(surface_diameters[0] if surface_diameters else None)
 
         # Parse wavelength (nm)
         try:
@@ -336,6 +386,7 @@ def main():
                 sys.modules["rayoptics.gui.appcmds"] = stub
 
             from singlet_rayoptics import calculate_and_format_results
+            from optics_visualization import render_optical_layout
             _debug("Import OK")
         except ImportError as e:
             _debug("Import failed: " + str(e))
@@ -345,12 +396,44 @@ def main():
             window.makeKeyAndOrderFront_(None)
             return
         _debug("About to run calculation")
+        opt_model = None
         try:
-            output = calculate_and_format_results(surf_data_list, wvl_nm=wvl_nm)
+            output, opt_model = calculate_and_format_results(
+                surf_data_list, wvl_nm=wvl_nm, return_opt_model=True,
+                surface_diameters=surface_diameters
+            )
             _debug("Calculation done, len=" + str(len(str(output))))
         except Exception as e:
             _debug("Calculation exception: " + str(e))
             output = "Calculation error: {}".format(e)
+            image_view.setImage_(None)
+
+        # Update visualization if we have a valid model
+        if opt_model is not None:
+            try:
+                import tempfile
+                _fd, viz_path = tempfile.mkstemp(suffix=".png", prefix="optics_")
+                os.close(_fd)
+                render_optical_layout(
+                    opt_model, wvl_nm=wvl_nm, num_rays=11,
+                    output_path=viz_path, figsize=(8, 4), dpi=100
+                )
+                ns_img = NSImage.alloc().initWithContentsOfFile_(viz_path)
+                try:
+                    os.remove(viz_path)
+                except OSError:
+                    pass
+                if ns_img is not None:
+                    image_view.setImage_(None)
+                    image_view.setImage_(ns_img)
+                    image_view.setNeedsDisplay_(True)
+                    image_view.displayIfNeeded()
+                    w = image_view.window()
+                    if w is not None:
+                        w.displayIfNeeded()
+                    _debug("Visualization updated")
+            except Exception as viz_err:
+                _debug("Visualization failed: " + str(viz_err))
 
         # 3. Update the result text area with the output
         if not (output and str(output).strip()):
