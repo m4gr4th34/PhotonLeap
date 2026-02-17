@@ -126,10 +126,14 @@ def calculate_and_format_results(surf_data_list, wvl_nm=587.6, return_opt_model=
         )
         efl, fod = get_focal_length(opt_model)
         if efl is not None:
+            sm = opt_model.seq_model
+            last_surf_z = sm.gbl_tfrms[-2][1][2] if len(sm.gbl_tfrms) >= 2 else 0
+            focal_point_z = last_surf_z + fod.bfl
             lines.append("Focal length (EFL): {:.4f} mm".format(efl))
             lines.append("Back focal length (BFL): {:.4f} mm".format(fod.bfl))
             lines.append("Front focal length (FFL): {:.4f} mm".format(fod.ffl))
             lines.append("F-number: {:.4f}".format(fod.fno))
+            lines.append("Focal point (z): {:.4f} mm  (from 1st surface; matches BFL)".format(focal_point_z))
         spot_xy, dxdy = run_spot_diagram(opt_model, num_rays=11, fld=0, wvl=wvl_nm)
         valid = ~np.isnan(dxdy[:, 0])
         if np.any(valid):

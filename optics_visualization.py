@@ -113,11 +113,31 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     except (KeyError, TypeError):
         fod = None
     bfl = fod.bfl if (fod and fod.efl != 0) else 50.0
-    if not np.isfinite(bfl) or bfl <= 0:
+    if not np.isfinite(bfl):
         bfl = 50.0
-    # Focal point: paraxial focus (last surface + BFL), not image plane
     last_surf_z = tfrms[-2][1][2] if len(tfrms) >= 2 else tfrms[-1][1][2]
-    focus_z = (last_surf_z + bfl - z_origin) if tfrms else 0
+    image_plane_z = tfrms[-1][1][2] - z_origin if tfrms else 0
+
+    # Focal point: where rays converge. Use last axial-ray crossing (final focus)
+    # when BFL > 0; use first crossing (intermediate) when BFL < 0 (virtual focus).
+    focus_z = None
+    if parax is not None and len(parax) >= 1:
+        ax_ray = parax[0]
+        crossings = []
+        for i in range(1, min(len(ax_ray), len(tfrms)) - 1):
+            h0, h1 = ax_ray[i][mc.ht], ax_ray[i + 1][mc.ht]
+            if h0 * h1 <= 0 and (h0 != 0 or h1 != 0):
+                z0 = tfrms[i][1][2] - z_origin
+                z1 = tfrms[i + 1][1][2] - z_origin
+                if abs(h1 - h0) > 1e-12:
+                    z_cross = z0 - h0 * (z1 - z0) / (h1 - h0)
+                else:
+                    z_cross = (z0 + z1) / 2
+                crossings.append(z_cross)
+        if crossings:
+            focus_z = crossings[-1] if bfl > 0 else crossings[0]
+    if focus_z is None:
+        focus_z = (last_surf_z + bfl - z_origin) if bfl > 0 else image_plane_z
 
     z_min, z_max = 0, 0
     y_extent = 5.0
@@ -218,11 +238,34 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     ax.axvline(wavefront_z, color='#3b82f6', linestyle='-', linewidth=1.2,
                alpha=0.7, zorder=2)
 
+    def _ray_inside_all_apertures(ray):
+        """Return True if ray intersection at every surface is within aperture.
+        Uses global coords for radial distance from optical axis (z)."""
+        for i, seg in enumerate(ray):
+            if i >= len(sm.ifcs) or i >= len(tfrms):
+                break
+            ifc = sm.ifcs[i]
+            if ifc.interact_mode == 'dummy':
+                continue
+            try:
+                p = seg[mc.p]
+                rot, trns = tfrms[i]
+                p_glob = rot.dot(p) + trns
+                r = np.sqrt(p_glob[0]**2 + p_glob[1]**2)
+                sd = ifc.surface_od()
+                if r > sd + 1e-6:
+                    return False
+            except (IndexError, TypeError, AttributeError, ZeroDivisionError):
+                continue
+        return True
+
     ray_polys = []
     for _, _, ray_result in ray_list:
         if ray_result is None:
             continue
         ray = ray_result[mc.ray]
+        if not _ray_inside_all_apertures(ray):
+            continue
         poly = _ray_to_polyline(ray, tfrms, extend_parallel_back=extend_left,
                                 extend_to_focus=True, focus_z=focus_z,
                                 z_origin=z_origin)
@@ -236,9 +279,9 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         max_ray_y = max(np.max(np.abs(p[:, 1])) for p in ray_polys)
         y_extent = max(y_extent, max_ray_y * 1.2, 5.0)
 
-    # 5. Draw output wavefront (spherical, converging to focus) as arc
+    # 5. Draw output wavefront (spherical, converging/diverging) as arc
     if focus_z is not None and len(ray_polys) > 0:
-        r = bfl * 0.3
+        r = abs(bfl) * 0.3
         theta = np.linspace(-np.pi / 2.5, np.pi / 2.5, 25)
         wf_z = focus_z - r * np.cos(theta)
         wf_y = r * np.sin(theta)
@@ -262,7 +305,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     ax.text(focus_z + 5, 0, 'Focus', fontsize=8, color='#dc2626',
             ha='left', va='center')
     if focus_z is not None and len(ray_polys) > 0:
-        wf_mid_z = focus_z - bfl * 0.15
+        wf_mid_z = focus_z - abs(bfl) * 0.15
         ax.text(wf_mid_z, y_extent * 0.85, 'Output\nwavefront',
                 fontsize=8, color='#059669', ha='center', va='top')
 
