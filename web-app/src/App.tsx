@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { NavBar, type NavTab } from './components/NavBar'
 import { Canvas } from './components/Canvas'
 import { SystemEditor } from './components/SystemEditor'
+import { InfoPanel } from './components/InfoPanel'
 import { SystemProperties } from './components/SystemProperties'
 import {
   DEFAULT_SYSTEM_STATE,
@@ -55,10 +56,13 @@ function loadLastDesign(): SystemState | null {
   }
 }
 
+import type { HighlightedMetric } from './types/ui'
+
 function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('lens')
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null)
   const [selectedSurfaceId, setSelectedSurfaceId] = useState<string | null>(null)
+  const [highlightedMetric, setHighlightedMetric] = useState<HighlightedMetric>(null)
   const [systemState, setSystemState] = useState<SystemState>(() => {
     const loaded = loadLastDesign()
     return loaded ?? { ...DEFAULT_SYSTEM_STATE, ...computePerformance(DEFAULT_SYSTEM_STATE) }
@@ -101,6 +105,7 @@ function App() {
               onSystemStateChange={onSystemStateChange}
               selectedSurfaceId={selectedSurfaceId}
               onSelectSurface={setSelectedSurfaceId}
+              highlightedMetric={null}
             />
           )}
           {activeTab === 'system' && (
@@ -111,6 +116,26 @@ function App() {
               selectedSurfaceId={selectedSurfaceId}
               onSelectSurface={setSelectedSurfaceId}
             />
+          )}
+          {activeTab === 'info' && (
+            <div className="flex flex-1 min-h-0 gap-4">
+              <div className="w-96 shrink-0 overflow-y-auto">
+                <InfoPanel
+                  highlightedMetric={highlightedMetric}
+                  onHighlightMetric={setHighlightedMetric}
+                />
+              </div>
+              <div className="flex-1 min-w-0 min-h-[400px]">
+                <Canvas
+                  systemState={systemState}
+                  onSystemStateChange={onSystemStateChange}
+                  selectedSurfaceId={selectedSurfaceId}
+                  onSelectSurface={setSelectedSurfaceId}
+                  highlightedMetric={highlightedMetric}
+                  showPersistentHud
+                />
+              </div>
+            </div>
           )}
           {activeTab === 'properties' && (
             <div className="h-full flex items-center justify-center text-slate-400">

@@ -3,8 +3,38 @@ import { motion } from 'framer-motion'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Play, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import type { SystemState, TraceResult, MetricsAtZ } from '../types/system'
+import type { HighlightedMetric } from '../types/ui'
 import { traceOpticalStack } from '../api/trace'
 import { config } from '../config'
+
+function HudRow({
+  label,
+  value,
+  metricId,
+  highlightedMetric,
+}: {
+  label: string
+  value: string
+  metricId: Exclude<HighlightedMetric, null>
+  highlightedMetric: HighlightedMetric
+}) {
+  const isHighlighted = highlightedMetric === metricId
+  return (
+    <>
+      <span className={isHighlighted ? 'text-cyan-electric' : 'text-slate-400'}>{label}</span>
+      <span
+        className="text-cyan-electric tabular-nums"
+        style={
+          isHighlighted
+            ? { boxShadow: '0 0 12px rgba(34, 211, 238, 0.6)', borderRadius: 4, padding: '0 4px' }
+            : undefined
+        }
+      >
+        {value}
+      </span>
+    </>
+  )
+}
 
 const GRID_SIZE = 64
 const GRID_EXTENT = 10000
@@ -174,6 +204,8 @@ type OpticalViewportProps = {
   onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
   selectedSurfaceId: string | null
   onSelectSurface: (id: string | null) => void
+  highlightedMetric?: HighlightedMetric
+  showPersistentHud?: boolean
 }
 
 export function OpticalViewport({
@@ -182,6 +214,8 @@ export function OpticalViewport({
   onSystemStateChange,
   selectedSurfaceId,
   onSelectSurface,
+  highlightedMetric = null,
+  showPersistentHud = false,
 }: OpticalViewportProps) {
   const [isTracing, setIsTracing] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
@@ -477,6 +511,16 @@ export function OpticalViewport({
   const scanMetrics = scanHud.isHovering
     ? interpolateMetricsAtZ(traceResult?.metricsSweep ?? [], scanHud.cursorZ)
     : null
+
+  const persistentHudZ = bestFocusZ ?? traceResult?.focusZ ?? totalLength * 0.8
+  const persistentMetrics = showPersistentHud
+    ? interpolateMetricsAtZ(traceResult?.metricsSweep ?? [], persistentHudZ)
+    : null
+
+  const showHud = scanHud.isHovering || showPersistentHud
+  const hudMetrics = scanHud.isHovering ? scanMetrics : persistentMetrics
+  const hudZ = scanHud.isHovering ? scanHud.cursorZ : persistentHudZ
+  const isPersistentHud = showPersistentHud && !scanHud.isHovering
 
   return (
     <div className={`relative ${className}`}>
@@ -839,55 +883,32 @@ export function OpticalViewport({
             </motion.button>
           </motion.div>
 
-          {scanHud.isHovering && (
+          {showHud && (
             <motion.div
-              className="pointer-events-none fixed z-50 rounded-lg px-3 py-2 backdrop-blur-[12px] bg-slate-900/70 border border-cyan-electric/50"
+              className={`pointer-events-none z-50 rounded-lg px-3 py-2 backdrop-blur-[12px] bg-slate-900/70 border border-cyan-electric/50 ${
+                isPersistentHud ? 'absolute bottom-20 left-4' : 'fixed'
+              }`}
               style={{
                 fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
+                ...(isPersistentHud ? {} : { left: scanHud.mouseX + 16, top: scanHud.mouseY + 16 }),
               }}
               initial={{ opacity: 0, scale: 0.95 }}
-              animate={{
-                left: scanHud.mouseX + 16,
-                top: scanHud.mouseY + 16,
-                opacity: 1,
-                scale: 1,
-              }}
+              animate={{ opacity: 1, scale: 1 }}
               transition={{ type: 'spring', stiffness: 200, damping: 20 }}
               exit={{ opacity: 0, scale: 0.95 }}
             >
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-                <span className="text-slate-400">Z:</span>
-                <span className="text-cyan-electric tabular-nums">
-                  {scanMetrics ? scanMetrics.z.toFixed(2) : scanHud.cursorZ.toFixed(2)} mm
-                </span>
-                <span className="text-slate-400">RMS:</span>
-                <span className="text-cyan-electric tabular-nums">
-                  {scanMetrics?.rmsRadius != null
-                    ? (scanMetrics.rmsRadius * 1000).toFixed(2)
-                    : '—'}
-                  {' µm'}
-                </span>
-                <span className="text-slate-400">Width:</span>
-                <span className="text-cyan-electric tabular-nums">
-                  {scanMetrics?.beamWidth != null
-                    ? scanMetrics.beamWidth.toFixed(3)
-                    : '—'}
-                  {' mm'}
-                </span>
-                <span className="text-slate-400">CRA:</span>
-                <span className="text-cyan-electric tabular-nums">
-                  {scanMetrics?.chiefRayAngle != null
-                    ? scanMetrics.chiefRayAngle.toFixed(2)
-                    : '—'}
-                  {'°'}
-                </span>
+              <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-xs">
+                <HudRow label="Z:" value={`${hudMetrics ? hudMetrics.z.toFixed(2) : hudZ.toFixed(2)} mm`} metricId="z" highlightedMetric={highlightedMetric} />
+                <HudRow label="RMS:" value={hudMetrics?.rmsRadius != null ? `${(hudMetrics.rmsRadius * 1000).toFixed(2)} µm` : '—'} metricId="rms" highlightedMetric={highlightedMetric} />
+                <HudRow label="Width:" value={hudMetrics?.beamWidth != null ? `${hudMetrics.beamWidth.toFixed(3)} mm` : '—'} metricId="beamWidth" highlightedMetric={highlightedMetric} />
+                <HudRow label="CRA:" value={hudMetrics?.chiefRayAngle != null ? `${hudMetrics.chiefRayAngle.toFixed(2)}°` : '—'} metricId="cra" highlightedMetric={highlightedMetric} />
                 {bestFocusZ != null && (
-                  <>
+                  <div className="col-span-2 flex gap-2">
                     <span className="text-slate-400">Dist to Best Focus:</span>
                     <span className="text-cyan-electric tabular-nums">
-                      {Math.abs(scanHud.cursorZ - bestFocusZ).toFixed(2)} mm
+                      {Math.abs(hudZ - bestFocusZ).toFixed(2)} mm
                     </span>
-                  </>
+                  </div>
                 )}
               </div>
             </motion.div>
