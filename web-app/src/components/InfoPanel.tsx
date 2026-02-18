@@ -1,5 +1,6 @@
+import { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Info, MoveHorizontal, Activity, Maximize2, Focus, Lightbulb } from 'lucide-react'
+import { Info, MoveHorizontal, Activity, Maximize2, Focus, Lightbulb, Copy, Check } from 'lucide-react'
 import type { HighlightedMetric } from '../types/ui'
 
 type GlossaryCardProps = {
@@ -23,6 +24,17 @@ function GlossaryCard({
   onMouseEnter,
   onMouseLeave,
 }: GlossaryCardProps) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(formula)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(false)
+    }
+  }, [formula])
+
   return (
     <motion.div
       layout
@@ -41,11 +53,29 @@ function GlossaryCard({
             <h3 className="font-bold text-cyan-electric text-base">{title}</h3>
           </div>
           <p className="text-slate-300 text-sm leading-relaxed mb-3">{explanation}</p>
-          <div
-            className="font-mono text-xs text-slate-400 bg-black/20 rounded-lg px-3 py-2 border border-white/5"
-            style={{ fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            {formula}
+          <div className="flex items-center gap-2">
+            <div
+              className="flex-1 min-w-0 font-mono text-xs text-slate-400 bg-black/20 rounded-lg px-3 py-2 border border-white/5"
+              style={{ fontFamily: "'JetBrains Mono', monospace" }}
+            >
+              {formula}
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleCopy()
+              }}
+              className="shrink-0 p-2 rounded-lg text-slate-400 hover:text-cyan-electric hover:bg-white/5 transition-colors"
+              title="Copy to clipboard"
+              aria-label="Copy formula to clipboard"
+            >
+              {copied ? (
+                <Check className="w-4 h-4 text-green-400" strokeWidth={2} />
+              ) : (
+                <Copy className="w-4 h-4" strokeWidth={2} />
+              )}
+            </button>
           </div>
         </div>
         <div className="shrink-0 w-20 h-20 flex items-center justify-center text-slate-500">
