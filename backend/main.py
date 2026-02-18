@@ -14,13 +14,12 @@ if not hasattr(np, "NaN"):
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Any
 
-# Import after path/numpy setup
-_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Import after path/numpy setup - backend dir must be on path
+_root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
-from api.trace_service import run_trace
+from trace_service import run_trace
 
 app = FastAPI(title="Optics Trace API", version="0.1.0")
 
@@ -33,9 +32,21 @@ app.add_middleware(
 )
 
 
+class SurfaceSchema(BaseModel):
+    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description)."""
+    id: str
+    type: str
+    radius: float
+    thickness: float
+    refractiveIndex: float
+    diameter: float
+    material: str
+    description: str
+
+
 class OpticalStackRequest(BaseModel):
     """Optical stack from React frontend."""
-    surfaces: list[dict[str, Any]]
+    surfaces: list[SurfaceSchema]
     entrancePupilDiameter: float = 10
     wavelengths: list[float] = [587.6]
     fieldAngles: list[float] = [0]

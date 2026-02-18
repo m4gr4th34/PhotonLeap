@@ -4,6 +4,11 @@ import os
 import sys
 import types
 
+# Ensure project root is on PYTHONPATH for backend imports
+_project_root = os.path.dirname(os.path.abspath(__file__))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 # NumPy 2.0 removed np.NaN; rayoptics uses it. Restore alias.
 import numpy as _np
 if not hasattr(_np, "NaN"):

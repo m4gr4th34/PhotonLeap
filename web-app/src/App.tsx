@@ -9,18 +9,20 @@ import {
   type SystemState,
   type Surface,
 } from './types/system'
+import { config } from './config'
 
 const STORAGE_KEY = 'last_design'
 
 function normalizeSurface(s: Partial<Surface> & { n?: number }, _i: number): Surface {
   const n = Number(s.refractiveIndex ?? s.n ?? 1) || 1
+  const d = config.surfaceDefaults
   return {
-    id: crypto.randomUUID(),
+    id: (typeof s.id === 'string' && s.id) ? s.id : crypto.randomUUID(),
     type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
     radius: Number(s.radius) || 0,
-    thickness: Number(s.thickness) || 10,
+    thickness: Number(s.thickness) || d.thickness,
     refractiveIndex: n,
-    diameter: Number(s.diameter) || 25,
+    diameter: Number(s.diameter) || d.diameter,
     material: String(s.material ?? 'Air'),
     description: String(s.description ?? ''),
   }
@@ -30,19 +32,19 @@ function loadLastDesign(): SystemState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    const data = JSON.parse(raw)
-    if (!data || !Array.isArray(data.surfaces)) return null
-    const rawSurfaces = data.surfaces.filter(
+    const optical_stack = JSON.parse(raw)
+    if (!optical_stack || !Array.isArray(optical_stack.surfaces)) return null
+    const rawSurfaces = optical_stack.surfaces.filter(
       (s: unknown): s is Record<string, unknown> => typeof s === 'object' && s !== null
     )
     const surfaces = rawSurfaces.map((s: Partial<Surface>, i: number) => normalizeSurface(s, i))
     const loaded: SystemState = {
       ...DEFAULT_SYSTEM_STATE,
       surfaces,
-      entrancePupilDiameter: Number(data.entrancePupilDiameter) || 10,
-      wavelengths: Array.isArray(data.wavelengths) ? data.wavelengths.map(Number) : DEFAULT_SYSTEM_STATE.wavelengths,
-      fieldAngles: Array.isArray(data.fieldAngles) ? data.fieldAngles.map(Number) : DEFAULT_SYSTEM_STATE.fieldAngles,
-      numRays: Number(data.numRays) || 9,
+      entrancePupilDiameter: Number(optical_stack.entrancePupilDiameter) || config.defaults.entrancePupilDiameter,
+      wavelengths: Array.isArray(optical_stack.wavelengths) ? optical_stack.wavelengths.map(Number) : DEFAULT_SYSTEM_STATE.wavelengths,
+      fieldAngles: Array.isArray(optical_stack.fieldAngles) ? optical_stack.fieldAngles.map(Number) : DEFAULT_SYSTEM_STATE.fieldAngles,
+      numRays: Number(optical_stack.numRays) || 9,
       hasTraced: false,
       traceResult: null,
       traceError: null,

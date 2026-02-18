@@ -1,7 +1,11 @@
 /**
  * API client for optical trace backend.
  * Sends optical_stack, receives (z,y) ray and surface coordinates.
+ * Surface shape matches types/system.Surface (single source of truth).
  */
+
+import type { Surface } from '../types/system'
+import { config } from '../config'
 
 export type TraceResponse = {
   rays?: number[][][]  // [[[z,y], ...], ...] per ray
@@ -16,32 +20,26 @@ export type TraceResponse = {
   error?: string
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = config.apiBaseUrl
 
-export async function traceOpticalStack(opticalStack: {
-  surfaces: Array<{
-    id?: string
-    type: string
-    radius: number
-    thickness: number
-    refractiveIndex: number
-    diameter?: number
-    material?: string
-    description?: string
-  }>
+export async function traceOpticalStack(optical_stack: {
+  surfaces: Surface[]
   entrancePupilDiameter: number
   wavelengths: number[]
   fieldAngles: number[]
   numRays: number
 }): Promise<TraceResponse> {
   const payload = {
-    ...opticalStack,
-    surfaces: opticalStack.surfaces.map((s) => ({
-      ...s,
-      n: s.refractiveIndex,
+    ...optical_stack,
+    surfaces: optical_stack.surfaces.map((s) => ({
+      id: s.id,
+      type: s.type,
       radius: s.radius,
       thickness: s.thickness,
-      diameter: s.diameter ?? 25,
+      refractiveIndex: s.refractiveIndex,
+      diameter: s.diameter,
+      material: s.material,
+      description: s.description,
     })),
   }
   const res = await fetch(`${API_BASE}/api/trace`, {

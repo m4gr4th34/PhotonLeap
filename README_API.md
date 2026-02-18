@@ -14,7 +14,7 @@ pip install fastapi "uvicorn[standard]"
 
 ```bash
 # From project root
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ## Endpoints

@@ -12,9 +12,15 @@ htmlcov/
 *.egg-info/
 .eggs/
 
+# Node
+node_modules/
+
 # Build / output
 dist/
 build/
+
+# OS
+.DS_Store
 
 # Logs
 *.log

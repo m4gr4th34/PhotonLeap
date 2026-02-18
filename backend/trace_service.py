@@ -12,10 +12,10 @@ import numpy as np
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
-# Ensure project root on path
-_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _root not in sys.path:
-    sys.path.insert(0, _root)
+# Ensure backend directory is on path for singlet_rayoptics import
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 # Stub rayoptics.gui.appcmds before any opticalmodel import
 if "rayoptics.gui.appcmds" not in sys.modules:
@@ -120,7 +120,7 @@ def optical_stack_to_surf_data(surfaces):
     for s in surfaces:
         r = float(s.get("radius", 0) or 0)
         t = float(s.get("thickness", 0) or 0)
-        n = float(s.get("n", s.get("refractiveIndex", 1)) or 1)
+        n = float(s.get("refractiveIndex", 1) or 1)
         curvature = 1.0 / r if r != 0 else 0.0
         v = 64.2 if (s.get("type") == "Glass" and n > 1.01) else 0.0
         surf_data_list.append([curvature, t, n, v])
@@ -144,7 +144,7 @@ def run_trace(optical_stack: dict) -> dict:
     field_angles = optical_stack.get("fieldAngles", [0])
 
     surf_data_list = optical_stack_to_surf_data(surfaces)
-    surface_diameters = [float(s.get("diameter", 25) or 25) for s in surfaces]
+    surface_diameters = [float(s.get("diameter", 25) or 25) for s in surfaces]  # diameter in mm
 
     try:
         opt_model = build_singlet_from_surface_data(

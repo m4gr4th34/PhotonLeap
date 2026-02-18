@@ -17,6 +17,8 @@ export type TraceResult = {
   performance?: { rmsSpotRadius: number; totalLength: number; fNumber: number }
 }
 
+import { config } from '../config'
+
 export type SystemState = {
   entrancePupilDiameter: number
   wavelengths: number[]
@@ -58,10 +60,10 @@ export function computePerformance(state: SystemState): Pick<
 }
 
 export const DEFAULT_SYSTEM_STATE: SystemState = {
-  entrancePupilDiameter: 10,
-  wavelengths: [587.6, 486.1, 656.3],
-  fieldAngles: [0, 7, 14],
-  numRays: 9,
+  entrancePupilDiameter: config.defaults.entrancePupilDiameter,
+  wavelengths: [...config.defaults.wavelengths],
+  fieldAngles: [...config.defaults.fieldAngles],
+  numRays: config.defaults.numRays,
   hasTraced: false,
   surfaces: [
     {

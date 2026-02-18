@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 # Skip if rayoptics/singlet cannot be imported
 try:
-    from singlet_rayoptics import (
+    from backend.singlet_rayoptics import (
         build_singlet_from_surface_data,
         get_focal_length,
         calculate_and_format_results,

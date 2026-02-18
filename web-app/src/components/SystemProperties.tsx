@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { Plus, Trash2 } from 'lucide-react'
 import type { SystemState } from '../types/system'
+import { config } from '../config'
 
 type SystemPropertiesProps = {
   systemState: SystemState
@@ -25,7 +26,7 @@ export function SystemProperties({
   const addWavelength = () => {
     onSystemStateChange((prev) => ({
       ...prev,
-      wavelengths: [...prev.wavelengths, 587.6],
+      wavelengths: [...prev.wavelengths, config.defaults.defaultWavelength],
     }))
   }
 
@@ -46,7 +47,7 @@ export function SystemProperties({
   const addFieldAngle = () => {
     onSystemStateChange((prev) => ({
       ...prev,
-      fieldAngles: [...prev.fieldAngles, 7],
+      fieldAngles: [...prev.fieldAngles, config.defaults.defaultFieldAngle],
     }))
   }
 
@@ -169,8 +170,8 @@ export function SystemProperties({
           <div className="flex items-center gap-3">
             <input
               type="range"
-              min={3}
-              max={21}
+            min={config.rayCount.min}
+            max={config.rayCount.max}
               value={systemState.numRays}
               onChange={(e) => update({ numRays: Number(e.target.value) })}
               className="flex-1 accent-cyan-electric"

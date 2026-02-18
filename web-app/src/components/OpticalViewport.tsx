@@ -3,9 +3,7 @@ import { motion } from 'framer-motion'
 import { Play, Loader2 } from 'lucide-react'
 import type { SystemState, TraceResult } from '../types/system'
 import { traceOpticalStack } from '../api/trace'
-
-// Field angle colors: cyan (on-axis), orange (mid), green (edge)
-const RAY_COLORS = ['#22D3EE', '#F97316', '#22C55E'] as const
+import { config } from '../config'
 
 type RayPoint = { x: number; y: number }
 type Ray = { points: RayPoint[]; color: string }
@@ -23,13 +21,14 @@ function generateRays(
     const t = numRays === 1 ? 0.5 : i / (numRays - 1)
     const y = (t - 0.5) * 2 * semiHeight * 0.9
     const distFromCenter = Math.abs(t - 0.5)
+    const colors = config.rayColors
     const color =
-      distFromCenter < 0.15 ? RAY_COLORS[0] : distFromCenter < 0.4 ? RAY_COLORS[1] : RAY_COLORS[2]
-    const focusY = y * 0.15
+      distFromCenter < 0.15 ? colors[0] : distFromCenter < 0.4 ? colors[1] : colors[2]
+    const focusY = y * config.paraxial.focusYFactor
     const points: RayPoint[] = [
       { x: 0, y },
       { x: lensX1, y },
-      { x: lensX2, y: y + (focusY - y) * 0.3 },
+      { x: lensX2, y: y + (focusY - y) * config.paraxial.lensToFocusFactor },
       { x: focusX, y: focusY },
     ]
     rays.push({ points, color })
@@ -60,7 +59,7 @@ function computeViewTransform(
   viewWidth: number,
   viewHeight: number
 ): { scale: number; xOffset: number; cy: number } {
-  const padding = 40
+  const { padding, scaleFactor, minZExtent, extendZFactor, extendZMin } = config.view
   const cy = viewHeight / 2
 
   // Z_total = total length of system (sum of all thicknesses)
@@ -72,11 +71,11 @@ function computeViewTransform(
   const yExtent = Math.max(dMax / 2, 5)
 
   let zMin = 0
-  let zMax = Math.max(zTotal, 50)
+  let zMax = Math.max(zTotal, extendZMin)
 
   if (surfaces.length) {
-    zMin = -Math.max(30, zTotal * 0.15)
-    zMax = zTotal + Math.max(50, zTotal * 0.2)
+    zMin = -Math.max(minZExtent, zTotal * extendZFactor)
+    zMax = zTotal + Math.max(extendZMin, zTotal * extendZFactor)
   }
 
   let effectiveYExtent = yExtent
@@ -100,7 +99,7 @@ function computeViewTransform(
   const scale = Math.min(
     (viewWidth - 2 * padding) / zRange,
     (viewHeight - 2 * padding) / yRange
-  ) * 0.9
+  ) * scaleFactor
   const zCenter = (zMin + zMax) / 2
   const xOffset = viewWidth / 2 - zCenter * scale
 
@@ -172,8 +171,8 @@ export function OpticalViewport({
     }
   }, [systemState, onSystemStateChange])
 
-  const viewWidth = 640
-  const viewHeight = 320
+  const viewWidth = config.viewport.width
+  const viewHeight = config.viewport.height
   const surfaces = systemState.surfaces
   const epd = systemState.entrancePupilDiameter ?? 10
   const semiHeight = epd / 2
@@ -264,8 +263,9 @@ export function OpticalViewport({
     if (traceResult?.rays?.length) {
       return traceResult.rays.map((pts) => {
         const distFromCenter = pts.length ? Math.abs(pts[0][1] / (semiHeight || 1)) : 0
+        const colors = config.rayColors
         const color =
-          distFromCenter < 0.15 ? RAY_COLORS[0] : distFromCenter < 0.4 ? RAY_COLORS[1] : RAY_COLORS[2]
+          distFromCenter < 0.15 ? colors[0] : distFromCenter < 0.4 ? colors[1] : colors[2]
         return {
           points: pts.map(([z, y]) => ({ x: z, y })),
           color,
@@ -305,8 +305,8 @@ export function OpticalViewport({
           <span className="text-slate-400 text-sm whitespace-nowrap">Rays</span>
           <input
             type="range"
-            min={3}
-            max={21}
+            min={config.rayCount.min}
+            max={config.rayCount.max}
             value={numRays}
             onChange={(e) => setNumRays(Number(e.target.value))}
             className="w-28 h-2 rounded-full accent-cyan-electric bg-white/10 cursor-pointer"

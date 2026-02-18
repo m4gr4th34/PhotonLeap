@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, Reorder, useDragControls } from 'framer-motion'
 import { Plus, Trash2, Download, Upload, GripVertical } from 'lucide-react'
 import type { SystemState, Surface } from '../types/system'
+import { config } from '../config'
 import {
   MATERIAL_PRESETS,
   getPresetForIndex,
@@ -100,7 +101,7 @@ const APP_VERSION = '0.0.0'
 
 /** Save design using File System Access API for native "Save As" experience. */
 async function saveDesign(systemState: SystemState): Promise<void> {
-  const data = {
+  const design = {
     optical_stack: {
       surfaces: systemState.surfaces,
       numRays: systemState.numRays,
@@ -120,7 +121,7 @@ async function saveDesign(systemState: SystemState): Promise<void> {
       appVersion: APP_VERSION,
     },
   }
-  const json = JSON.stringify(data, null, 2)
+  const json = JSON.stringify(design, null, 2)
 
   if (!('showSaveFilePicker' in window)) {
     const blob = new Blob([json], { type: 'application/json' })
@@ -157,16 +158,17 @@ async function saveDesign(systemState: SystemState): Promise<void> {
   }
 }
 
-/** Normalize a loaded surface to ensure all fields exist and ID is unique. */
+/** Normalize a loaded surface to ensure all fields exist; preserve id if valid. */
 function normalizeSurface(s: Partial<Surface> & { n?: number }, _index: number): Surface {
   const n = Number(s.refractiveIndex ?? s.n ?? 1) || 1
+  const d = config.surfaceDefaults
   return {
-    id: crypto.randomUUID(),
+    id: (typeof s.id === 'string' && s.id) ? s.id : crypto.randomUUID(),
     type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
     radius: Number(s.radius) || 0,
-    thickness: Number(s.thickness) || 10,
+    thickness: Number(s.thickness) || d.thickness,
     refractiveIndex: n,
-    diameter: Number(s.diameter) || 25,
+    diameter: Number(s.diameter) || d.diameter,
     material: String(s.material ?? 'Air'),
     description: String(s.description ?? ''),
   }
@@ -300,13 +302,14 @@ function SurfaceRow({
 
 /** Create a new surface with unique ID. Defaults to Air (n=1.0) so the physics engine knows the ray medium. */
 function createSurface(): Surface {
+  const d = config.surfaceDefaults
   return {
     id: crypto.randomUUID(),
     type: 'Air',
     radius: 0,
-    thickness: 10,
-    refractiveIndex: 1.0,
-    diameter: 25,
+    thickness: d.thickness,
+    refractiveIndex: d.refractiveIndex,
+    diameter: d.diameter,
     material: 'Air',
     description: '',
   }
@@ -327,30 +330,30 @@ type LoadedParams = {
 }
 
 function applyLoadedData(
-  data: unknown,
+  optical_stack: unknown,
   onSystemStateChange: SystemEditorProps['onSystemStateChange']
 ) {
-  const raw = data as {
+  const parsed = optical_stack as {
     optical_stack?: LoadedStack
     system_parameters?: LoadedParams
     system_properties?: { totalLength?: number; fNumber?: number; rmsSpotRadius?: number }
   }
-  const stack: LoadedStack = raw.optical_stack ?? (raw as unknown as LoadedStack)
-  const params: LoadedParams = raw.system_parameters ?? stack
-  const props = raw.system_properties ?? {}
+  const loaded: LoadedStack = parsed.optical_stack ?? (parsed as unknown as LoadedStack)
+  const params: LoadedParams = parsed.system_parameters ?? loaded
+  const props = parsed.system_properties ?? {}
 
-  const loadedSurfaces = Array.isArray(stack.surfaces)
-    ? stack.surfaces.filter((s): s is Record<string, unknown> => typeof s === 'object' && s !== null)
+  const loadedSurfaces = Array.isArray(loaded.surfaces)
+    ? loaded.surfaces.filter((s): s is Record<string, unknown> => typeof s === 'object' && s !== null)
     : []
   const normalizedSurfaces = loadedSurfaces.map((s, i) =>
     normalizeSurface(s as Partial<Surface> & { n?: number }, i)
   )
 
   const entrancePupilDiameter =
-    Number(params.entrancePupilDiameter ?? stack.entrancePupilDiameter) || 10
-  const wavelengthsArr = params.wavelengths ?? stack.wavelengths
+    Number(params.entrancePupilDiameter ?? loaded.entrancePupilDiameter) || config.defaults.entrancePupilDiameter
+  const wavelengthsArr = params.wavelengths ?? loaded.wavelengths
   const wavelengths = Array.isArray(wavelengthsArr) ? wavelengthsArr.map(Number) : undefined
-  const fieldAnglesArr = params.fieldAngles ?? stack.fieldAngles
+  const fieldAnglesArr = params.fieldAngles ?? loaded.fieldAngles
   const fieldAngles = Array.isArray(fieldAnglesArr) ? fieldAnglesArr.map(Number) : undefined
 
   onSystemStateChange((prev) => ({
@@ -359,7 +362,7 @@ function applyLoadedData(
     entrancePupilDiameter,
     wavelengths: wavelengths ?? prev.wavelengths,
     fieldAngles: fieldAngles ?? prev.fieldAngles,
-    numRays: Number(stack.numRays ?? prev.numRays) || 9,
+    numRays: Number(loaded.numRays ?? prev.numRays) || config.defaults.numRays,
     totalLength: Number(props.totalLength ?? prev.totalLength) || 0,
     fNumber: Number(props.fNumber ?? prev.fNumber) || 0,
     rmsSpotRadius: Number(props.rmsSpotRadius ?? prev.rmsSpotRadius) || 0,
@@ -378,12 +381,12 @@ export function SystemEditor({
   const surfaces = systemState.surfaces
   const [customMaterialIds, setCustomMaterialIds] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
-  const [hoveredInsertIndex, setHoveredInsertIndex] = useState<number | null>(null)
+  const [hoveredInsertId, setHoveredInsertId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(null), 2500)
+    const t = setTimeout(() => setToast(null), config.toastDuration)
     return () => clearTimeout(t)
   }, [toast])
 
@@ -397,8 +400,8 @@ export function SystemEditor({
         })
         const file = await handle.getFile()
         const text = await file.text()
-        const data = JSON.parse(text)
-        applyLoadedData(data, onSystemStateChange)
+        const optical_stack = JSON.parse(text)
+        applyLoadedData(optical_stack, onSystemStateChange)
         onLoadComplete?.(handle.name)
         onSelectSurface(null)
         setToast('Success')
@@ -418,8 +421,8 @@ export function SystemEditor({
     reader.onload = () => {
       try {
         const text = reader.result as string
-        const data = JSON.parse(text)
-        applyLoadedData(data, onSystemStateChange)
+        const optical_stack = JSON.parse(text)
+        applyLoadedData(optical_stack, onSystemStateChange)
         onLoadComplete?.(file.name)
         onSelectSurface(null)
         setToast('Success')
@@ -431,46 +434,46 @@ export function SystemEditor({
     e.target.value = ''
   }
 
-  const updateSurface = (index: number, partial: Partial<Surface>) => {
+  const updateSurface = (id: string, partial: Partial<Surface>) => {
     onSystemStateChange((prev) => ({
       ...prev,
-      surfaces: prev.surfaces.map((s, i) =>
-        i === index ? { ...s, ...partial } : s
+      surfaces: prev.surfaces.map((s) =>
+        s.id === id ? { ...s, ...partial } : s
       ),
     }))
   }
 
-  const updateMaterial = (index: number, n: number, material: string, type: 'Glass' | 'Air') => {
-    updateSurface(index, { refractiveIndex: n, material, type })
+  const updateMaterial = (id: string, n: number, material: string, type: 'Glass' | 'Air') => {
+    updateSurface(id, { refractiveIndex: n, material, type })
   }
 
-  const removeSurface = (index: number) => {
+  const removeSurface = (id: string) => {
     if (surfaces.length <= 1) return
-    const idToRemove = surfaces[index]?.id
-    if (idToRemove) {
-      if (selectedSurfaceId === idToRemove) onSelectSurface(null)
-      setCustomMaterialIds((prev) => {
-        const next = new Set(prev)
-        next.delete(idToRemove)
-        return next
-      })
-    }
+    if (selectedSurfaceId === id) onSelectSurface(null)
+    setCustomMaterialIds((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
     onSystemStateChange((prev) => ({
       ...prev,
-      surfaces: prev.surfaces.filter((_, i) => i !== index),
+      surfaces: prev.surfaces.filter((s) => s.id !== id),
     }))
   }
 
-  const insertSurfaceAt = (index: number) => {
+  /** Insert surface after the surface with given id; null = insert at start. */
+  const insertSurfaceAfter = (afterId: string | null) => {
     const newSurface = createSurface()
-    onSystemStateChange((prev) => ({
-      ...prev,
-      surfaces: [
-        ...prev.surfaces.slice(0, index),
-        newSurface,
-        ...prev.surfaces.slice(index),
-      ],
-    }))
+    onSystemStateChange((prev) => {
+      if (afterId === null) {
+        return { ...prev, surfaces: [newSurface, ...prev.surfaces] }
+      }
+      const idx = prev.surfaces.findIndex((s) => s.id === afterId)
+      if (idx < 0) return prev
+      const next = [...prev.surfaces]
+      next.splice(idx + 1, 0, newSurface)
+      return { ...prev, surfaces: next }
+    })
     onSelectSurface(newSurface.id)
   }
 
@@ -564,9 +567,55 @@ export function SystemEditor({
               onReorder={handleReorder}
               className="divide-y divide-white/5"
             >
+              {/* Insert row at start */}
+              <motion.tr
+                key="insert-at-start"
+                layout
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              >
+                <td
+                  colSpan={8}
+                  className="p-0 align-middle"
+                  onMouseEnter={() => setHoveredInsertId('__start__')}
+                  onMouseLeave={() => setHoveredInsertId(null)}
+                  onClick={() => insertSurfaceAfter(null)}
+                >
+                  <div
+                    className={`flex items-center justify-center cursor-pointer transition-all duration-150 ${
+                      hoveredInsertId === '__start__' ? 'h-8 bg-cyan-electric/5' : 'h-2 hover:h-5 hover:bg-white/5'
+                    }`}
+                  >
+                    <div
+                      className={`flex items-center gap-2 transition-all duration-150 ${
+                        hoveredInsertId === '__start__' ? 'opacity-100' : 'opacity-0'
+                      }`}
+                    >
+                      <div
+                        className={`h-px flex-1 max-w-[80px] transition-colors ${
+                          hoveredInsertId === '__start__' ? 'bg-cyan-electric' : 'bg-transparent'
+                        }`}
+                      />
+                      <div
+                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                          hoveredInsertId === '__start__'
+                            ? 'bg-cyan-electric text-midnight'
+                            : 'bg-white/20 text-slate-400'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      </div>
+                      <div
+                        className={`h-px flex-1 max-w-[80px] transition-colors ${
+                          hoveredInsertId === '__start__' ? 'bg-cyan-electric' : 'bg-transparent'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                </td>
+              </motion.tr>,
               {surfaces.flatMap((s, i) => {
-                const insertIndex = i + 1
-                const isHovered = hoveredInsertIndex === insertIndex
+                const insertAfterId = s.id
+                const isHovered = hoveredInsertId === insertAfterId
                 return [
                   <SurfaceRow
                     key={s.id}
@@ -574,10 +623,10 @@ export function SystemEditor({
                     index={i}
                     isSelected={selectedSurfaceId === s.id}
                     onSelect={() => onSelectSurface(s.id)}
-                    onUpdate={(partial) => updateSurface(i, partial)}
-                    onRemove={() => removeSurface(i)}
+                    onUpdate={(partial) => updateSurface(s.id, partial)}
+                    onRemove={() => removeSurface(s.id)}
                     onMaterialUpdate={(n, material, type) =>
-                      updateMaterial(i, n, material, type)
+                      updateMaterial(s.id, n, material, type)
                     }
                     onSetCustomMode={(custom) => {
                       setCustomMaterialIds((prev) => {
@@ -593,16 +642,16 @@ export function SystemEditor({
                     MaterialSelect={MaterialSelect}
                   />,
                   <motion.tr
-                    key={`insert-${insertIndex}`}
+                    key={`insert-after-${insertAfterId}`}
                     layout
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   >
                     <td
                       colSpan={8}
                       className="p-0 align-middle"
-                      onMouseEnter={() => setHoveredInsertIndex(insertIndex)}
-                      onMouseLeave={() => setHoveredInsertIndex(null)}
-                      onClick={() => insertSurfaceAt(insertIndex)}
+                      onMouseEnter={() => setHoveredInsertId(insertAfterId)}
+                      onMouseLeave={() => setHoveredInsertId(null)}
+                      onClick={() => insertSurfaceAfter(insertAfterId)}
                     >
                       <div
                         className={`flex items-center justify-center cursor-pointer transition-all duration-150 ${
