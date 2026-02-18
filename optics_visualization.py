@@ -14,9 +14,13 @@ from rayoptics.raytr import sampler
 from rayoptics.raytr import analyses
 
 
-# Light blue glass color with 0.3 opacity
+# Glass colors (work on light and dark)
 LENS_FILL = "rgba(135, 206, 235, 0.3)"  # light blue, semi-transparent
 LENS_LINE = "rgba(44, 82, 130, 0.8)"
+# High-contrast ray/wavefront colors for dark theme
+RAY_COLOR = "rgba(0, 212, 255, 0.95)"   # Electric Blue
+WAVEFRONT_IN_COLOR = "rgba(0, 212, 255, 0.6)"
+WAVEFRONT_OUT_COLOR = "rgba(57, 255, 20, 0.9)"   # Neon Green
 
 
 def _profile_points(ifc, sd, n_pts=31):
@@ -111,7 +115,8 @@ def _ray_slope_intercept(poly):
 
 
 def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
-                          figsize=(10, 5), dpi=100, template="plotly_white", return_html=False):
+                          figsize=(10, 5), dpi=100, template="plotly_dark", return_html=False,
+                          return_figure=False, show_grid=True):
     """
     Render optical layout: filled lens elements, wave propagation (wavefronts),
     traced rays, extending to the focal point.
@@ -316,7 +321,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
                 x=poly[:, 0],
                 y=poly[:, 1],
                 mode="lines",
-                line=dict(color="rgba(37, 99, 235, 0.8)", width=1.2),
+                line=dict(color=RAY_COLOR, width=1.2),
                 name=f"Ray {ray_idx + 1}",
                 customdata=[[slope_str, y_int_str]],
                 hovertemplate=hover + "<extra></extra>",
@@ -332,7 +337,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         x=[wavefront_z, wavefront_z],
         y=[-y_extent, y_extent],
         mode="lines",
-        line=dict(color="rgba(59, 130, 246, 0.7)", width=1.2),
+        line=dict(color=WAVEFRONT_IN_COLOR, width=1.2),
         showlegend=False,
         hoverinfo="skip",
     ))
@@ -347,17 +352,18 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
             x=wf_z,
             y=wf_y,
             mode="lines",
-            line=dict(color="rgba(5, 150, 105, 0.8)", width=1.2),
+            line=dict(color=WAVEFRONT_OUT_COLOR, width=1.2),
             showlegend=False,
             hoverinfo="skip",
         ))
 
     # 6. Optical axis
+    axis_color = "rgba(180, 180, 180, 0.5)" if template == "plotly_dark" else "rgba(107, 114, 128, 0.6)"
     fig.add_trace(go.Scatter(
         x=[z_min, z_max],
         y=[0, 0],
         mode="lines",
-        line=dict(color="rgba(107, 114, 128, 0.6)", width=0.8, dash="dot"),
+        line=dict(color=axis_color, width=0.8, dash="dot"),
         showlegend=False,
         hoverinfo="skip",
     ))
@@ -384,12 +390,12 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         mode="markers",
         marker=dict(
             size=10,
-            color="rgb(220, 38, 38)",
-            line=dict(width=2, color="rgba(255, 100, 100, 0.8)"),
+            color="rgb(255, 80, 80)",
+            line=dict(width=2, color="rgba(255, 150, 150, 0.9)"),
             symbol="circle",
         ),
         name="Focus",
-        hovertemplate="Focus<br>z = %{x:.2f} mm<extra></extra>",
+        hovertemplate="<b>Focus</b><br>z = %{x:.2f} mm<br>y = %{y:.2f} mm<extra></extra>",
         showlegend=False,
     ))
 
@@ -397,7 +403,13 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     x_range = [z_min - z_margin, z_max + z_margin]
     y_range = [-y_extent, y_extent]
 
-    # Layout: modern grid, fixed aspect, template
+    # Layout: modern grid (or clean canvas), fixed aspect, template
+    grid_style = dict(
+        gridcolor="rgba(120, 120, 120, 0.4)" if template == "plotly_dark" else "lightgray",
+        griddash="dot",
+        zeroline=False,
+        showgrid=show_grid,
+    )
     fig.update_layout(
         template=template,
         xaxis=dict(
@@ -405,18 +417,12 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
             range=x_range,
             scaleanchor="y",
             scaleratio=1,
-            gridcolor="lightgray",
-            griddash="dot",
-            zeroline=False,
-            showgrid=True,
+            **grid_style,
         ),
         yaxis=dict(
             title="y (mm)",
             range=y_range,
-            gridcolor="lightgray",
-            griddash="dot",
-            zeroline=False,
-            showgrid=True,
+            **grid_style,
         ),
         plot_bgcolor="white" if template == "plotly_white" else None,
         paper_bgcolor="white" if template == "plotly_white" else None,
@@ -425,10 +431,12 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         showlegend=False,
     )
 
-    # Export: HTML for WebView (no Kaleido) or PNG for file/tests
+    # Export: figure object (Streamlit), HTML (WebView), or PNG (file/tests)
     width_px = int(figsize[0] * dpi)
     height_px = int(figsize[1] * dpi)
 
+    if return_figure:
+        return fig
     if return_html:
         # to_html() needs no Kaleido/Chromium - safe for embedded WebView
         return fig.to_html(include_plotlyjs=True, full_html=True,

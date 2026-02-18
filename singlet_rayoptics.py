@@ -76,6 +76,65 @@ def get_focal_length(opt_model):
     return fod.efl, fod
 
 
+def get_ray_trace_table(opt_model, num_rays=11, fld=0, wvl=None, foc=0.0):
+    """
+    Return ray-trace data as a list of dicts for DataFrame display.
+    Columns: Ray, Pupil X, Pupil Y, Y at S1 (mm), Slope (1/mm), Angle (deg),
+             Spot X (mm), Spot Y (mm), Trans DX (mm), Trans DY (mm).
+    """
+    from rayoptics.optical import model_constants as mc
+    osp = opt_model.optical_spec
+    fld_obj = osp.field_of_view.fields[fld]
+    wvl = wvl or osp.spectral_region.central_wvl
+    tfrms = opt_model.seq_model.gbl_tfrms
+
+    grid_def = [np.array([-1., -1.]), np.array([1., 1.]), num_rays]
+    pupil_coords = list(sampler.grid_ray_generator(grid_def))
+    ray_list = analyses.trace_ray_list(
+        opt_model, pupil_coords, fld_obj, wvl, foc, check_apertures=True
+    )
+    ray_list_data = analyses.focus_pupil_coords(
+        opt_model, ray_list, fld_obj, wvl, foc
+    )
+    ref_sphere, _ = trace.setup_pupil_coords(opt_model, fld_obj, wvl, foc)
+    ref_pt = ref_sphere[0]
+    dxdy = np.array([r[:2] for r in ray_list_data])
+    spot_xy = ref_pt[:2] + dxdy
+
+    rows = []
+    for idx, (_, _, ray_result) in enumerate(ray_list):
+        if ray_result is None:
+            continue
+        px, py = pupil_coords[idx]
+        ray = ray_result[mc.ray]
+        if len(ray) < 2 or idx >= len(spot_xy):
+            continue
+        # First real surface intercept (segment 1)
+        seg = ray[1]
+        p = seg[mc.p]
+        d = seg[mc.d]
+        rot, trns = tfrms[1]
+        p_glob = rot.dot(p) + trns
+        y_s1 = p_glob[1]
+        dz, dy = rot.dot(d)[2], rot.dot(d)[1]
+        slope = (dy / dz) if abs(dz) > 1e-12 else np.nan
+        angle_deg = np.degrees(np.arctan(slope)) if np.isfinite(slope) else np.nan
+
+        rows.append({
+            "Ray": idx + 1,
+            "Pupil X": round(px, 4),
+            "Pupil Y": round(py, 4),
+            "Y at S1 (mm)": round(y_s1, 4),
+            "Slope (1/mm)": round(slope, 6) if np.isfinite(slope) else np.nan,
+            "Angle (deg)": round(angle_deg, 4) if np.isfinite(angle_deg) else np.nan,
+            "Spot X (mm)": round(spot_xy[idx, 0], 6),
+            "Spot Y (mm)": round(spot_xy[idx, 1], 6),
+            "Trans DX (mm)": round(dxdy[idx, 0], 6),
+            "Trans DY (mm)": round(dxdy[idx, 1], 6),
+        })
+    return rows
+
+
 def run_spot_diagram(opt_model, num_rays=21, fld=0, wvl=None, foc=0.0):
     """
     Run sequential ray trace for a grid in the pupil; return spot (x,y) and dx,dy.
