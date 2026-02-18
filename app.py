@@ -33,15 +33,6 @@ if not hasattr(np, "NaN"):
 import streamlit as st
 import pandas as pd
 
-# Default surface schema (Z-Position computed by recalc_z_positions)
-DEFAULT_SURFACES = [
-    {"Type": "Glass", "Radius": 100.0, "Thickness": 5.0, "Refractive Index": 1.5168, "Z-Position": 0.0},
-    {"Type": "Air", "Radius": -100.0, "Thickness": 95.0, "Refractive Index": 1.0, "Z-Position": 5.0},
-]
-
-NEW_SURFACE_ROW = {"Type": "Air", "Radius": 0.0, "Thickness": 10.0, "Refractive Index": 1.0, "Z-Position": 0.0}
-
-
 def recalc_z_positions(optical_stack):
     """
     Recalculate Z-Position for every surface as sum of preceding thicknesses.
@@ -83,13 +74,26 @@ def sort_by_z_position(optical_stack):
     return [s for _, s in sorted(z_and_surf, key=lambda x: x[0])]
 
 
+def _safe_float(val, default):
+    """Extract float from value; use default only when missing or invalid."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def _normalize_record(r):
     """Ensure a record has valid defaults for all fields (handles new rows from + button)."""
+    if not isinstance(r, dict):
+        return {"Type": "Air", "Radius": 0.0, "Thickness": 10.0, "Refractive Index": 1.0}
+    t = r.get("Type")
     return {
-        "Type": r.get("Type") if r.get("Type") in ("Glass", "Air") else "Air",
-        "Radius": float(r.get("Radius") or 0) if pd.notna(r.get("Radius")) else 0.0,
-        "Thickness": float(r.get("Thickness") or 10) if pd.notna(r.get("Thickness")) else 10.0,
-        "Refractive Index": float(r.get("Refractive Index") or 1) if pd.notna(r.get("Refractive Index")) else 1.0,
+        "Type": t if t in ("Glass", "Air") else "Air",
+        "Radius": _safe_float(r.get("Radius"), 0.0),
+        "Thickness": _safe_float(r.get("Thickness"), 10.0),
+        "Refractive Index": _safe_float(r.get("Refractive Index"), 1.0),
     }
 
 
@@ -107,10 +111,17 @@ def surfaces_to_surf_data(surfaces):
 
 st.set_page_config(page_title="Lens Ray-Optics Calculator", layout="wide")
 
-# --- Session state: optical_stack (list of surfaces) ---
+# --- Session state: optical_stack (single source of truth) ---
 if "optical_stack" not in st.session_state:
-    st.session_state.optical_stack = [dict(s) for s in DEFAULT_SURFACES]
+    st.session_state.optical_stack = [
+        {"Type": "Glass", "Radius": 100.0, "Thickness": 5.0, "Refractive Index": 1.5168},
+        {"Type": "Air", "Radius": -100.0, "Thickness": 95.0, "Refractive Index": 1.0},
+    ]
     recalc_z_positions(st.session_state.optical_stack)
+
+# Trace only runs when user clicks "Trace Rays" (avoids flicker while typing)
+if "trace_requested" not in st.session_state:
+    st.session_state.trace_requested = True
 
 # --- Sidebar: global params + surface table ---
 with st.sidebar:
@@ -149,9 +160,13 @@ with st.sidebar:
     with plus_col:
         insert_clicked = st.button("➕", help="Insert surface at selected position", key="insert_plus")
     with clear_col:
-        clear_clicked = st.button("Clear All", use_container_width=True)
+        clear_clicked = st.button("Clear All", width="stretch")
     with sort_col:
-        sort_clicked = st.button("Sort by Z", use_container_width=True, help="Sort by distance from source")
+        sort_clicked = st.button("Sort by Z", width="stretch", help="Sort by distance from source")
+
+    def _invalidate_cache():
+        for k in ("cached_fig", "cached_results", "cached_ray_table", "cached_error"):
+            st.session_state.pop(k, None)
 
     if insert_clicked:
         if len(stack) == 0:
@@ -160,82 +175,97 @@ with st.sidebar:
             idx = insert_options.index(insert_after)
             add_surface(idx + 1, 0.0, 10.0, "Air")
         recalc_z_positions(st.session_state.optical_stack)
+        if "my_editor" in st.session_state:
+            del st.session_state["my_editor"]
+        _invalidate_cache()
         st.rerun()
     if clear_clicked:
-        st.session_state.optical_stack = [dict(NEW_SURFACE_ROW)]
+        st.session_state.optical_stack = [
+            {"Type": "Air", "Radius": 0.0, "Thickness": 10.0, "Refractive Index": 1.0},
+        ]
         recalc_z_positions(st.session_state.optical_stack)
+        if "my_editor" in st.session_state:
+            del st.session_state["my_editor"]
+        _invalidate_cache()
         st.rerun()
     if sort_clicked:
         st.session_state.optical_stack = sort_by_z_position(st.session_state.optical_stack)
         recalc_z_positions(st.session_state.optical_stack)
+        if "my_editor" in st.session_state:
+            del st.session_state["my_editor"]
+        _invalidate_cache()
         st.rerun()
 
     df = pd.DataFrame(st.session_state.optical_stack)
-    edited_df = st.data_editor(
-        df,
-        column_config={
-            "Z-Position": st.column_config.NumberColumn(
-                "Z-Position (mm)",
-                format="%.2f",
-                help="Calculated from preceding thicknesses (read-only)",
-            ),
-            "Type": st.column_config.SelectboxColumn(
-                "Type",
-                options=["Glass", "Air"],
-                required=True,
-            ),
-            "Radius": st.column_config.NumberColumn(
-                "Radius (mm)",
-                format="%.2f",
-                default=0.0,
-            ),
-            "Thickness": st.column_config.NumberColumn(
-                "Thickness (mm)",
-                format="%.2f",
-                default=10.0,
-            ),
-            "Refractive Index": st.column_config.NumberColumn(
-                "Refractive Index",
-                format="%.3f",
-                default=1.0,
-            ),
-        },
-        column_order=["Z-Position", "Type", "Radius", "Thickness", "Refractive Index"],
-        disabled=["Z-Position"],
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-    )
+    with st.container():
+        edited_df = st.data_editor(
+            df,
+            key="my_editor",
+            column_config={
+                "Z-Position": st.column_config.NumberColumn(
+                    "Z-Position (mm)",
+                    format="%.2f",
+                    help="Calculated from preceding thicknesses (read-only)",
+                ),
+                "Type": st.column_config.SelectboxColumn(
+                    "Type",
+                    options=["Glass", "Air"],
+                    required=True,
+                ),
+                "Radius": st.column_config.NumberColumn(
+                    "Radius (mm)",
+                    format="%.2f",
+                    default=0.0,
+                ),
+                "Thickness": st.column_config.NumberColumn(
+                    "Thickness (mm)",
+                    format="%.2f",
+                    default=10.0,
+                ),
+                "Refractive Index": st.column_config.NumberColumn(
+                    "Refractive Index",
+                    format="%.3f",
+                    default=1.0,
+                ),
+            },
+            column_order=["Z-Position", "Type", "Radius", "Thickness", "Refractive Index"],
+            disabled=["Z-Position"],
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+        )
 
-    # Sync data_editor → optical_stack (single source of truth). Handles add (+), delete (trash), edit.
+    # Sync from data_editor return value (reliable; on_change was receiving stale data)
     if edited_df is not None:
         if len(edited_df) == 0:
             st.session_state.optical_stack = []
         else:
-            records = []
-            for r in edited_df.to_dict("records"):
-                nr = _normalize_record(r)
-                records.append(nr)
+            records_raw = edited_df.to_dict("records")
+            records = [_normalize_record(r) for r in records_raw if r is not None]
             st.session_state.optical_stack = records
             recalc_z_positions(st.session_state.optical_stack)
 
 # --- Main area: header + visualization ---
 st.title("Lens Ray-Optics Calculator")
 st.markdown(
-    "Interactive optical layout and ray trace for multi-surface optical systems. "
-    "Edit the surface table in the sidebar to add, remove, or modify surfaces. "
-    "The visualization updates automatically when the table changes."
+    "Edit the surface table in the sidebar, then click **Trace Rays** to run the analysis. "
+    "The visualization updates only when you trace, so you can type without flickering."
 )
 st.markdown("---")
 
-# Build model and render
+# Trace Rays button: triggers ray-trace (does not run on every keystroke)
+trace_clicked = st.button("Trace Rays", type="primary")
+if trace_clicked:
+    st.session_state.trace_requested = True
+
 surfaces = st.session_state.optical_stack
 if not surfaces:
     st.warning("Add at least one surface to run the analysis.")
-else:
+elif st.session_state.trace_requested:
+    st.session_state.trace_requested = False
     try:
         surf_data_list = surfaces_to_surf_data(surfaces)
-        surface_diameters = [10.0] * len(surfaces)  # default 10 mm diameter per surface
+        surface_diameters = [10.0] * len(surfaces)
 
         from singlet_rayoptics import (
             build_singlet_from_surface_data,
@@ -254,20 +284,31 @@ else:
             opt_model, wvl_nm=wvl_nm, num_rays=num_rays,
             return_figure=True, figsize=(12, 6), show_grid=show_grid
         )
+        ray_table = get_ray_trace_table(opt_model, num_rays=num_rays, wvl=wvl_nm)
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.session_state.cached_fig = fig
+        st.session_state.cached_results = results_text
+        st.session_state.cached_ray_table = ray_table
+        st.session_state.cached_error = None
+    except Exception as e:
+        st.session_state.cached_error = str(e)
+        st.session_state.cached_fig = None
+        st.session_state.cached_results = None
+        st.session_state.cached_ray_table = None
 
+# Show cached results (or error)
+if surfaces:
+    if "cached_error" in st.session_state and st.session_state.cached_error:
+        st.error(st.session_state.cached_error)
+        st.info("Check that radius, thickness, and refractive index are valid. Use n=1 for air.")
+    elif "cached_fig" in st.session_state and st.session_state.cached_fig is not None:
+        st.plotly_chart(st.session_state.cached_fig, width="stretch")
         with st.expander("Numerical results"):
-            st.code(results_text, language=None)
-
+            st.code(st.session_state.cached_results, language=None)
         with st.expander("Technical Specifications", expanded=False):
-            ray_table = get_ray_trace_table(opt_model, num_rays=num_rays, wvl=wvl_nm)
-            if ray_table:
-                df_rays = pd.DataFrame(ray_table)
-                st.dataframe(df_rays, use_container_width=True, hide_index=True)
+            if st.session_state.cached_ray_table:
+                st.dataframe(pd.DataFrame(st.session_state.cached_ray_table), width="stretch", hide_index=True)
             else:
                 st.info("No ray-trace data available.")
-
-    except Exception as e:
-        st.error(f"Error: {e}")
-        st.info("Check that radius, thickness, and refractive index are valid. Use n=1 for air.")
+    else:
+        st.info("Click **Trace Rays** to run the analysis.")

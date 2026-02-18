@@ -1,5 +1,32 @@
+# Python
 venv/
+.venv/
 __pycache__/
-dist/
+*.py[cod]
+*$py.class
+*.so
+.Python
 .pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# Build / output
+dist/
+build/
+
+# Logs
+*.log
 test_run.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
