@@ -576,6 +576,7 @@ export function SystemEditor({
                 <td
                   colSpan={8}
                   className="p-0 align-middle"
+                  data-testid="insert-surface-at-start"
                   onMouseEnter={() => setHoveredInsertId('__start__')}
                   onMouseLeave={() => setHoveredInsertId(null)}
                   onClick={() => insertSurfaceAfter(null)}
@@ -612,7 +613,7 @@ export function SystemEditor({
                     </div>
                   </div>
                 </td>
-              </motion.tr>,
+              </motion.tr>
               {surfaces.flatMap((s, i) => {
                 const insertAfterId = s.id
                 const isHovered = hoveredInsertId === insertAfterId
@@ -649,6 +650,7 @@ export function SystemEditor({
                     <td
                       colSpan={8}
                       className="p-0 align-middle"
+                      data-testid="insert-surface-after"
                       onMouseEnter={() => setHoveredInsertId(insertAfterId)}
                       onMouseLeave={() => setHoveredInsertId(null)}
                       onClick={() => insertSurfaceAfter(insertAfterId)}
