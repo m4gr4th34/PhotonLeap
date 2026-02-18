@@ -8,6 +8,7 @@ import { config } from '../config'
 
 const GRID_SIZE = 64
 const GRID_EXTENT = 10000
+const SCAN_SNAP_PX = 5
 
 type RayPoint = { x: number; y: number }
 type Ray = { points: RayPoint[]; color: string }
@@ -389,8 +390,9 @@ export function OpticalViewport({
     mouseY: number
     cursorSvgX: number
     cursorSvgY: number
+    scanSvgX: number
     cursorZ: number
-  }>({ isHovering: false, mouseX: 0, mouseY: 0, cursorSvgX: 0, cursorSvgY: 0, cursorZ: 0 })
+  }>({ isHovering: false, mouseX: 0, mouseY: 0, cursorSvgX: 0, cursorSvgY: 0, scanSvgX: 0, cursorZ: 0 })
 
   const handleSvgMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
@@ -425,17 +427,30 @@ export function OpticalViewport({
         cursorSvgY = (e.clientY - rect.top - offsetY) / scaleFit
       }
 
-      const zCursorPos = (cursorSvgX - xOffset) / scale
+      const snapTargetsZ = [...zPositions]
+      if (traceResult?.focusZ != null) snapTargetsZ.push(traceResult.focusZ)
+      const snapTargetsSvgX = snapTargetsZ.map((z) => z * scale + xOffset)
+      let scanSvgX = cursorSvgX
+      let bestDist = SCAN_SNAP_PX
+      for (const targetX of snapTargetsSvgX) {
+        const d = Math.abs(cursorSvgX - targetX)
+        if (d < bestDist) {
+          bestDist = d
+          scanSvgX = targetX
+        }
+      }
+      const zCursorPos = (scanSvgX - xOffset) / scale
       setScanHud({
         isHovering: true,
         mouseX: e.clientX,
         mouseY: e.clientY,
         cursorSvgX,
         cursorSvgY,
+        scanSvgX,
         cursorZ: zCursorPos,
       })
     },
-    [scale, xOffset, viewWidth, viewHeight]
+    [scale, xOffset, viewWidth, viewHeight, zPositions, traceResult?.focusZ]
   )
 
   const handleSvgMouseLeave = useCallback(() => {
@@ -762,9 +777,9 @@ export function OpticalViewport({
           {scanHud.isHovering && (
             <>
               <line
-                x1={scanHud.cursorSvgX}
+                x1={scanHud.scanSvgX}
                 y1={0}
-                x2={scanHud.cursorSvgX}
+                x2={scanHud.scanSvgX}
                 y2={viewHeight}
                 stroke="#22D3EE"
                 strokeWidth="1"
