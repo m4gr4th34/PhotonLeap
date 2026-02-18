@@ -2,6 +2,8 @@
 
 Open-source, license-free optical design software with a **React + FastAPI** architecture. Design singlet lenses, run ray traces, and visualize performance metrics.
 
+![Lens Designer screenshot](docs/screenshot.png)
+
 ## Architecture
 
 ```
