@@ -65,7 +65,7 @@ export const DEFAULT_SYSTEM_STATE: SystemState = {
   hasTraced: false,
   surfaces: [
     {
-      id: '1',
+      id: crypto.randomUUID(),
       type: 'Glass',
       radius: 100,
       thickness: 5,
@@ -75,7 +75,7 @@ export const DEFAULT_SYSTEM_STATE: SystemState = {
       description: 'Front surface',
     },
     {
-      id: '2',
+      id: crypto.randomUUID(),
       type: 'Air',
       radius: -100,
       thickness: 95,

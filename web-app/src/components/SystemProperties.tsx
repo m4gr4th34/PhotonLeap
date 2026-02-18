@@ -1,15 +1,23 @@
+import { motion } from 'framer-motion'
 import { Plus, Trash2 } from 'lucide-react'
 import type { SystemState } from '../types/system'
 
 type SystemPropertiesProps = {
   systemState: SystemState
   onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
+  selectedSurfaceId: string | null
+  onSelectSurface: (id: string | null) => void
 }
 
 const inputClass =
   'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-electric/50'
 
-export function SystemProperties({ systemState, onSystemStateChange }: SystemPropertiesProps) {
+export function SystemProperties({
+  systemState,
+  onSystemStateChange,
+  selectedSurfaceId,
+  onSelectSurface,
+}: SystemPropertiesProps) {
   const update = (partial: Partial<SystemState>) => {
     onSystemStateChange((prev) => ({ ...prev, ...partial }))
   }
@@ -203,15 +211,22 @@ export function SystemProperties({ systemState, onSystemStateChange }: SystemPro
           <h3 className="text-sm font-medium text-slate-300 mb-3">Surfaces</h3>
           <div className="space-y-2">
             {systemState.surfaces.map((s) => (
-              <div
+              <motion.div
                 key={s.id}
-                className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 border border-white/10"
+                layout
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                onClick={() => onSelectSurface(s.id)}
+                className={`flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 border transition-colors ${
+                  selectedSurfaceId === s.id
+                    ? 'bg-cyan-electric/20 border-cyan-electric/50 ring-1 ring-cyan-electric/50'
+                    : 'bg-white/5 border-white/10 hover:bg-white/10'
+                }`}
               >
                 <span className="text-sm">
                   {s.material ?? s.type} R={s.radius}
                 </span>
                 <span className="text-cyan-electric text-xs">t={s.thickness}</span>
-              </div>
+              </motion.div>
             ))}
           </div>
         </section>

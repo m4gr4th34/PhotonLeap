@@ -12,10 +12,10 @@ import {
 
 const STORAGE_KEY = 'last_design'
 
-function normalizeSurface(s: Partial<Surface> & { n?: number }, i: number): Surface {
+function normalizeSurface(s: Partial<Surface> & { n?: number }, _i: number): Surface {
   const n = Number(s.refractiveIndex ?? s.n ?? 1) || 1
   return {
-    id: s.id ?? `s-${Date.now()}-${i}`,
+    id: crypto.randomUUID(),
     type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
     radius: Number(s.radius) || 0,
     thickness: Number(s.thickness) || 10,
@@ -32,7 +32,10 @@ function loadLastDesign(): SystemState | null {
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || !Array.isArray(data.surfaces)) return null
-    const surfaces = data.surfaces.map((s: Partial<Surface>, i: number) => normalizeSurface(s, i))
+    const rawSurfaces = data.surfaces.filter(
+      (s: unknown): s is Record<string, unknown> => typeof s === 'object' && s !== null
+    )
+    const surfaces = rawSurfaces.map((s: Partial<Surface>, i: number) => normalizeSurface(s, i))
     const loaded: SystemState = {
       ...DEFAULT_SYSTEM_STATE,
       surfaces,
@@ -53,6 +56,7 @@ function loadLastDesign(): SystemState | null {
 function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('lens')
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null)
+  const [selectedSurfaceId, setSelectedSurfaceId] = useState<string | null>(null)
   const [systemState, setSystemState] = useState<SystemState>(() => {
     const loaded = loadLastDesign()
     return loaded ?? { ...DEFAULT_SYSTEM_STATE, ...computePerformance(DEFAULT_SYSTEM_STATE) }
@@ -100,6 +104,8 @@ function App() {
               systemState={systemState}
               onSystemStateChange={onSystemStateChange}
               onLoadComplete={setLoadedFileName}
+              selectedSurfaceId={selectedSurfaceId}
+              onSelectSurface={setSelectedSurfaceId}
             />
           )}
           {activeTab === 'properties' && (
@@ -117,6 +123,8 @@ function App() {
           <SystemProperties
             systemState={systemState}
             onSystemStateChange={onSystemStateChange}
+            selectedSurfaceId={selectedSurfaceId}
+            onSelectSurface={setSelectedSurfaceId}
           />
         </aside>
       </div>

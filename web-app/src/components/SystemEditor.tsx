@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { Plus, Trash2, Download, Upload } from 'lucide-react'
 import type { SystemState, Surface } from '../types/system'
 import {
@@ -11,6 +12,8 @@ type SystemEditorProps = {
   systemState: SystemState
   onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
   onLoadComplete?: (fileName: string) => void
+  selectedSurfaceId: string | null
+  onSelectSurface: (id: string | null) => void
 }
 
 const inputClass =
@@ -154,11 +157,11 @@ async function saveDesign(systemState: SystemState): Promise<void> {
   }
 }
 
-/** Normalize a loaded surface to ensure all fields exist. */
-function normalizeSurface(s: Partial<Surface> & { n?: number }, index: number): Surface {
+/** Normalize a loaded surface to ensure all fields exist and ID is unique. */
+function normalizeSurface(s: Partial<Surface> & { n?: number }, _index: number): Surface {
   const n = Number(s.refractiveIndex ?? s.n ?? 1) || 1
   return {
-    id: s.id ?? `s-${Date.now()}-${index}`,
+    id: crypto.randomUUID(),
     type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
     radius: Number(s.radius) || 0,
     thickness: Number(s.thickness) || 10,
@@ -169,10 +172,10 @@ function normalizeSurface(s: Partial<Surface> & { n?: number }, index: number): 
   }
 }
 
-/** Create a new surface. Defaults to Air (n=1.0) so the physics engine knows the ray medium. */
-function createSurface(id: string): Surface {
+/** Create a new surface with unique ID. Defaults to Air (n=1.0) so the physics engine knows the ray medium. */
+function createSurface(): Surface {
   return {
-    id,
+    id: crypto.randomUUID(),
     type: 'Air',
     radius: 0,
     thickness: 10,
@@ -210,8 +213,10 @@ function applyLoadedData(
   const params: LoadedParams = raw.system_parameters ?? stack
   const props = raw.system_properties ?? {}
 
-  const loadedSurfaces = Array.isArray(stack.surfaces) ? stack.surfaces : []
-  const normalizedSurfaces = loadedSurfaces.map((s: unknown, i: number) =>
+  const loadedSurfaces = Array.isArray(stack.surfaces)
+    ? stack.surfaces.filter((s): s is Record<string, unknown> => typeof s === 'object' && s !== null)
+    : []
+  const normalizedSurfaces = loadedSurfaces.map((s, i) =>
     normalizeSurface(s as Partial<Surface> & { n?: number }, i)
   )
 
@@ -237,7 +242,13 @@ function applyLoadedData(
   }))
 }
 
-export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete }: SystemEditorProps) {
+export function SystemEditor({
+  systemState,
+  onSystemStateChange,
+  onLoadComplete,
+  selectedSurfaceId,
+  onSelectSurface,
+}: SystemEditorProps) {
   const surfaces = systemState.surfaces
   const [customMaterialIds, setCustomMaterialIds] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
@@ -262,6 +273,7 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
         const data = JSON.parse(text)
         applyLoadedData(data, onSystemStateChange)
         onLoadComplete?.(handle.name)
+        onSelectSurface(null)
         setToast('Success')
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return
@@ -282,6 +294,7 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
         const data = JSON.parse(text)
         applyLoadedData(data, onSystemStateChange)
         onLoadComplete?.(file.name)
+        onSelectSurface(null)
         setToast('Success')
       } catch {
         setToast('Invalid file')
@@ -308,6 +321,7 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
     if (surfaces.length <= 1) return
     const idToRemove = surfaces[index]?.id
     if (idToRemove) {
+      if (selectedSurfaceId === idToRemove) onSelectSurface(null)
       setCustomMaterialIds((prev) => {
         const next = new Set(prev)
         next.delete(idToRemove)
@@ -321,18 +335,21 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
   }
 
   const addSurface = () => {
-    const mid = Math.floor(surfaces.length / 2)
-    const newSurface = createSurface(
-      `s-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    )
+    const newSurface = createSurface()
+    const selectedIndex = selectedSurfaceId
+      ? surfaces.findIndex((s) => s.id === selectedSurfaceId)
+      : -1
+    const insertIndex = selectedIndex >= 0 ? selectedIndex + 1 : surfaces.length
+
     onSystemStateChange((prev) => ({
       ...prev,
       surfaces: [
-        ...prev.surfaces.slice(0, mid),
+        ...prev.surfaces.slice(0, insertIndex),
         newSurface,
-        ...prev.surfaces.slice(mid),
+        ...prev.surfaces.slice(insertIndex),
       ],
     }))
+    onSelectSurface(newSurface.id)
   }
 
   const columns = [
@@ -422,9 +439,19 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
             </thead>
             <tbody className="divide-y divide-white/5">
               {surfaces.map((s, i) => (
-                <tr
+                <motion.tr
                   key={s.id}
-                  className="hover:bg-white/5 transition-colors"
+                  layout
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('input, button, select')) return
+                    onSelectSurface(s.id)
+                  }}
+                  className={`cursor-pointer transition-colors ${
+                    selectedSurfaceId === s.id
+                      ? 'bg-cyan-electric/20 ring-1 ring-cyan-electric/50'
+                      : 'hover:bg-white/5'
+                  }`}
                 >
                   <td className="px-4 py-3 text-slate-400 font-mono text-sm">
                     {i + 1}
@@ -508,7 +535,7 @@ export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete 
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
