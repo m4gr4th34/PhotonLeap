@@ -1,4 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+
+/** Debug: log HUD z (optical mm) and RMS. Set true to diagnose HUD/line disconnect. */
+const DEBUG_HUD_COORDS = import.meta.env.DEV
 import { motion } from 'framer-motion'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Play, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
@@ -7,28 +10,90 @@ import type { HighlightedMetric } from '../types/ui'
 import { traceOpticalStack } from '../api/trace'
 import { config } from '../config'
 
+/** Mini RMS vs Z graph for HUD — shows curve and current cursor Z. */
+function RmsVsZGraph({
+  sweep,
+  currentZ,
+  width = 100,
+  height = 36,
+}: {
+  sweep: MetricsAtZ[]
+  currentZ: number
+  width?: number
+  height?: number
+}) {
+  if (!sweep.length) return null
+  const zMin = sweep[0].z
+  const zMax = sweep[sweep.length - 1].z
+  const zRange = zMax - zMin || 1
+  const rmsVals = sweep.map((p) => p.rmsRadius).filter((r): r is number => r != null)
+  const rmsMax = Math.max(...rmsVals, 1e-6)
+  const pad = 2
+  const w = width - 2 * pad
+  const h = height - 2 * pad
+  const pts = sweep
+    .filter((p) => p.rmsRadius != null)
+    .map((p) => {
+      const x = pad + (w * (p.z - zMin)) / zRange
+      const y = pad + h - (h * (p.rmsRadius! / rmsMax))
+      return `${x},${y}`
+    })
+  const pathD = pts.length >= 2 ? `M ${pts.join(' L ')}` : ''
+  const cursorX = pad + (w * Math.max(0, Math.min(1, (currentZ - zMin) / zRange)))
+  return (
+    <svg width={width} height={height} className="block">
+      {pathD && (
+        <path
+          d={pathD}
+          fill="none"
+          stroke="rgba(34, 211, 238, 0.8)"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      <line
+        x1={cursorX}
+        y1={pad}
+        x2={cursorX}
+        y2={height - pad}
+        stroke="#f97316"
+        strokeWidth="1"
+        strokeDasharray="2 2"
+      />
+    </svg>
+  )
+}
+
 function HudRow({
   label,
   value,
   metricId,
   highlightedMetric,
+  labelColor,
 }: {
   label: string
   value: string
   metricId: Exclude<HighlightedMetric, null>
   highlightedMetric: HighlightedMetric
+  labelColor?: string
 }) {
   const isHighlighted = highlightedMetric === metricId
   return (
     <>
-      <span className={isHighlighted ? 'text-cyan-electric' : 'text-slate-400'}>{label}</span>
       <span
-        className="text-cyan-electric tabular-nums"
-        style={
-          isHighlighted
+        className={isHighlighted ? 'text-cyan-electric' : 'text-slate-400'}
+        style={labelColor && !isHighlighted ? { color: labelColor } : undefined}
+      >
+        {label}
+      </span>
+      <span
+        className="tabular-nums"
+        style={{
+          color: labelColor ?? 'var(--electric-cyan, #22D3EE)',
+          ...(isHighlighted
             ? { boxShadow: '0 0 12px rgba(34, 211, 238, 0.6)', borderRadius: 4, padding: '0 4px' }
-            : undefined
-        }
+            : {}),
+        }}
       >
         {value}
       </span>
@@ -176,7 +241,87 @@ function computeOpticalBounds(
   return { zRange: zMax - zMin, yExtent }
 }
 
-/** Interpolate metrics at arbitrary Z from precomputed sweep. */
+/**
+ * Interpolate ray Y at Z — matches backend _interpolate_ray_at_z logic exactly.
+ * Ray format: [[z,y], [z,y], ...]. Returns y or null.
+ */
+function interpolateRayAtZ(ray: number[][], zPos: number): number | null {
+  if (!ray?.length || ray.length < 2) return null
+  const zVals = ray.map((p) => p[0])
+  const yVals = ray.map((p) => p[1])
+  const zMin = Math.min(...zVals)
+  const zMax = Math.max(...zVals)
+  if (zPos <= zMin) {
+    const dz = zVals[1] - zVals[0]
+    const dy = yVals[1] - yVals[0]
+    const slope = Math.abs(dz) > 1e-12 ? dy / dz : 0
+    return yVals[0] + slope * (zPos - zVals[0])
+  }
+  if (zPos >= zMax) {
+    const dz = zVals[zVals.length - 1] - zVals[zVals.length - 2]
+    const dy = yVals[yVals.length - 1] - yVals[yVals.length - 2]
+    const slope = Math.abs(dz) > 1e-12 ? dy / dz : 0
+    return yVals[yVals.length - 1] + slope * (zPos - zVals[zVals.length - 1])
+  }
+  for (let i = 0; i < ray.length - 1; i++) {
+    const z0 = zVals[i]
+    const z1 = zVals[i + 1]
+    if (z0 <= zPos && zPos <= z1) {
+      const dz = z1 - z0
+      const t = Math.abs(dz) > 1e-12 ? (zPos - z0) / dz : 0
+      return yVals[i] + t * (yVals[i + 1] - yVals[i])
+    }
+  }
+  return null
+}
+
+/**
+ * Compute caustic envelope path (upper + lower boundary of ray bundle).
+ * Uses interpolateRayAtZ — same logic as backend get_metrics_at_z.
+ */
+function computeCausticEnvelope(
+  rays: number[][][] | undefined,
+  toSvg: (z: number, y: number) => string,
+  numSamples = 80
+): string | null {
+  if (!rays?.length) return null
+  const allZ: number[] = []
+  for (const ray of rays) {
+    for (const pt of ray) allZ.push(pt[0])
+  }
+  const zMin = Math.min(...allZ)
+  const zMax = Math.max(...allZ)
+  if (zMax <= zMin) return null
+  const zSamples: number[] = []
+  for (let i = 0; i <= numSamples; i++) {
+    zSamples.push(zMin + (i / numSamples) * (zMax - zMin))
+  }
+  const upper: string[] = []
+  const lower: string[] = []
+  for (const z of zSamples) {
+    const ys: number[] = []
+    for (const ray of rays) {
+      const y = interpolateRayAtZ(ray, z)
+      if (y != null) ys.push(y)
+    }
+    if (ys.length > 0) {
+      const maxY = Math.max(...ys)
+      const minY = Math.min(...ys)
+      upper.push(toSvg(z, maxY))
+      lower.push(toSvg(z, minY))
+    }
+  }
+  if (upper.length < 2) return null
+  const upperPath = `M ${upper.join(' L ')}`
+  const lowerPath = `L ${[...lower].reverse().join(' L ')} Z`
+  return `${upperPath} ${lowerPath}`
+}
+
+/**
+ * Interpolate metrics at arbitrary Z from precomputed sweep.
+ * Uses optical Z (mm) — NOT screen pixels or array indices.
+ * Sweep is from backend: [{z, rmsRadius, ...}, ...] with z in mm.
+ */
 function interpolateMetricsAtZ(sweep: MetricsAtZ[] | undefined, z: number): MetricsAtZ | null {
   if (!sweep?.length) return null
   if (z <= sweep[0].z) return sweep[0]
@@ -188,6 +333,10 @@ function interpolateMetricsAtZ(sweep: MetricsAtZ[] | undefined, z: number): Metr
   const t = (z - a.z) / (b.z - a.z)
   const lerp = (x: number | null, y: number | null) =>
     x != null && y != null ? x + t * (y - x) : x ?? y ?? null
+  const rmsPerField =
+    a.rmsPerField && b.rmsPerField && a.rmsPerField.length === b.rmsPerField.length
+      ? a.rmsPerField.map((av, j) => lerp(av, b.rmsPerField![j]))
+      : a.rmsPerField
   return {
     z,
     rmsRadius: lerp(a.rmsRadius, b.rmsRadius),
@@ -195,6 +344,7 @@ function interpolateMetricsAtZ(sweep: MetricsAtZ[] | undefined, z: number): Metr
     chiefRayAngle: lerp(a.chiefRayAngle, b.chiefRayAngle),
     yCentroid: lerp(a.yCentroid, b.yCentroid),
     numRays: a.numRays,
+    rmsPerField,
   }
 }
 
@@ -220,6 +370,7 @@ export function OpticalViewport({
   const [isTracing, setIsTracing] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [isSpaceHeld, setIsSpaceHeld] = useState(false)
+  const [showCausticEnvelope, setShowCausticEnvelope] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -259,6 +410,7 @@ export function OpticalViewport({
         wavelengths: systemState.wavelengths,
         fieldAngles: systemState.fieldAngles,
         numRays: systemState.numRays,
+        focusMode: systemState.focusMode ?? 'On-Axis',
       })
       if (res.error) {
         onSystemStateChange((prev) => ({
@@ -323,6 +475,11 @@ export function OpticalViewport({
   const toSvg = (z: number, y: number) =>
     `${z * scale + xOffset},${cy - y * scale}`
 
+  const causticEnvelopePath = useMemo(() => {
+    if (!showCausticEnvelope || !traceResult?.rays?.length) return null
+    return computeCausticEnvelope(traceResult.rays, toSvg, 80)
+  }, [showCausticEnvelope, traceResult?.rays, scale, xOffset, cy])
+
   /** Generate SVG path for a single surface profile at z with given radius and diameter */
   function surfaceProfilePath(
     zPos: number,
@@ -383,15 +540,17 @@ export function OpticalViewport({
     return elements
   }, [surfaces, zPositions, epd, scale, xOffset, cy])
 
-  // Rays: backend data or paraxial fallback
+  // Rays: backend data or paraxial fallback. Colors by field index (cyan=on-axis, orange=mid, green=edge).
   const rays = useMemo(() => {
     if (!hasTraced) return []
     if (traceResult?.rays?.length) {
-      return traceResult.rays.map((pts) => {
-        const distFromCenter = pts.length ? Math.abs(pts[0][1] / (semiHeight || 1)) : 0
-        const colors = config.rayColors
-        const color =
-          distFromCenter < 0.15 ? colors[0] : distFromCenter < 0.4 ? colors[1] : colors[2]
+      const fieldAngles = systemState.fieldAngles || [0]
+      const numFields = Math.max(1, fieldAngles.length)
+      const raysPerField = Math.ceil(traceResult.rays.length / numFields)
+      const colors = config.rayColors
+      return traceResult.rays.map((pts, i) => {
+        const fieldIndex = Math.min(Math.floor(i / raysPerField), numFields - 1)
+        const color = colors[Math.min(fieldIndex, colors.length - 1)]
         return {
           points: pts.map(([z, y]) => ({ x: z, y })),
           color,
@@ -399,7 +558,7 @@ export function OpticalViewport({
       })
     }
     return generateRays(numRays, lensX1, lensX2, focusX, semiHeight)
-  }, [hasTraced, traceResult, numRays, lensX1, lensX2, focusX, semiHeight])
+  }, [hasTraced, traceResult, numRays, lensX1, lensX2, focusX, semiHeight, systemState.fieldAngles])
 
   const focusSvgX = traceResult?.focusZ != null
     ? traceResult.focusZ * scale + xOffset
@@ -473,7 +632,11 @@ export function OpticalViewport({
           scanSvgX = targetX
         }
       }
+      // Optical Z (mm) = (SVG X - xOffset) / scale — NOT screen pixels; SVG X is in viewBox units
       const zCursorPos = (scanSvgX - xOffset) / scale
+      if (DEBUG_HUD_COORDS) {
+        console.log('[HUD] coord chain: clientX=', e.clientX, '| cursorSvgX (viewBox)=', cursorSvgX.toFixed(1), '| scanSvgX=', scanSvgX.toFixed(1), '| scale=', scale.toFixed(2), 'xOffset=', xOffset.toFixed(1), '→ zCursorPos (optical mm)=', zCursorPos.toFixed(3))
+      }
       setScanHud({
         isHovering: true,
         mouseX: e.clientX,
@@ -512,6 +675,12 @@ export function OpticalViewport({
     ? interpolateMetricsAtZ(traceResult?.metricsSweep ?? [], scanHud.cursorZ)
     : null
 
+  if (DEBUG_HUD_COORDS && scanHud.isHovering && scanMetrics) {
+    const sweep = traceResult?.metricsSweep ?? []
+    const sweepZRange = sweep.length ? `[${sweep[0].z.toFixed(2)}, ${sweep[sweep.length - 1].z.toFixed(2)}] mm` : 'empty'
+    console.log('[HUD] zCursorPos (optical mm):', scanHud.cursorZ.toFixed(3), '| RMS:', scanMetrics.rmsRadius != null ? (scanMetrics.rmsRadius * 1000).toFixed(2) + ' µm' : '—', '| sweep Z range:', sweepZRange)
+  }
+
   const persistentHudZ = bestFocusZ ?? traceResult?.focusZ ?? totalLength * 0.8
   const persistentMetrics = showPersistentHud
     ? interpolateMetricsAtZ(traceResult?.metricsSweep ?? [], persistentHudZ)
@@ -524,7 +693,7 @@ export function OpticalViewport({
 
   return (
     <div className={`relative ${className}`}>
-      <div className="absolute top-4 left-4 z-10 flex items-center gap-4 glass-card px-4 py-2 rounded-lg">
+      <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-4 glass-card px-4 py-2 rounded-lg">
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.98 }}
@@ -556,6 +725,17 @@ export function OpticalViewport({
           />
           <span className="text-cyan-electric text-sm font-mono w-6">{numRays}</span>
         </div>
+        {hasTraced && (
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={showCausticEnvelope}
+              onChange={(e) => setShowCausticEnvelope(e.target.checked)}
+              className="rounded accent-cyan-electric"
+            />
+            Caustic Envelope
+          </label>
+        )}
       </div>
 
       {traceError && (
@@ -684,6 +864,11 @@ export function OpticalViewport({
                   <stop offset="50%" stopColor="#22D3EE" stopOpacity="0.25" />
                   <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.15" />
                 </linearGradient>
+                <linearGradient id="caustic-envelope-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.08" />
+                  <stop offset="50%" stopColor="#22D3EE" stopOpacity="0.18" />
+                  <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.08" />
+                </linearGradient>
               </defs>
 
               <rect
@@ -693,6 +878,17 @@ export function OpticalViewport({
                 height={GRID_EXTENT * 2}
                 fill="url(#infinite-grid)"
               />
+
+          {causticEnvelopePath && (
+            <path
+              d={causticEnvelopePath}
+              fill="url(#caustic-envelope-fill)"
+              stroke="rgba(34, 211, 238, 0.4)"
+              strokeWidth="0.5"
+              opacity="0.6"
+              pointerEvents="none"
+            />
+          )}
 
           <g filter="url(#lens-glow)">
             {lensElements.map((el) => {
@@ -809,8 +1005,8 @@ export function OpticalViewport({
               >
                 <polygon
                   points="0,-6 6,0 0,6 -6,0"
-                  fill="white"
-                  stroke="rgba(255,255,255,0.9)"
+                  fill={systemState.focusMode === 'Balanced' ? '#F59E0B' : 'white'}
+                  stroke={systemState.focusMode === 'Balanced' ? 'rgba(245,158,11,0.95)' : 'rgba(255,255,255,0.9)'}
                   strokeWidth="1"
                   filter="url(#diamond-glow)"
                 />
@@ -899,7 +1095,48 @@ export function OpticalViewport({
             >
               <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-xs">
                 <HudRow label="Z:" value={`${hudMetrics ? hudMetrics.z.toFixed(2) : hudZ.toFixed(2)} mm`} metricId="z" highlightedMetric={highlightedMetric} />
-                <HudRow label="RMS:" value={hudMetrics?.rmsRadius != null ? `${(hudMetrics.rmsRadius * 1000).toFixed(2)} µm` : '—'} metricId="rms" highlightedMetric={highlightedMetric} />
+                {hudMetrics?.rmsPerField && hudMetrics.rmsPerField.length > 0 ? (
+                  <>
+                    {hudMetrics.rmsPerField.map((rms, fi) => {
+                      const fieldLabels = ['Cyan RMS', 'Orange RMS', 'Green RMS']
+                      const fieldColors = ['#22D3EE', '#F97316', '#22C55E']
+                      const label = fieldLabels[Math.min(fi, fieldLabels.length - 1)]
+                      const color = fieldColors[Math.min(fi, fieldColors.length - 1)]
+                      return (
+                        <HudRow
+                          key={fi}
+                          label={`${label}:`}
+                          value={rms != null ? `${(rms * 1000).toFixed(2)} µm` : '—'}
+                          metricId="rms"
+                          highlightedMetric={highlightedMetric}
+                          labelColor={color}
+                        />
+                      )
+                    })}
+                    {(() => {
+                      const valid = hudMetrics.rmsPerField.filter((r): r is number => r != null)
+                      const sysAvg =
+                        valid.length > 0
+                          ? Math.sqrt(valid.reduce((s, r) => s + r * r, 0) / valid.length)
+                          : null
+                      return (
+                        <div className="col-span-2 flex justify-between gap-2 border-t border-white/10 mt-1 pt-1">
+                          <span className="text-slate-400 font-medium">System Avg RMS:</span>
+                          <span className="text-amber-400 tabular-nums font-medium">
+                            {sysAvg != null ? `${(sysAvg * 1000).toFixed(2)} µm` : '—'}
+                          </span>
+                        </div>
+                      )
+                    })()}
+                  </>
+                ) : (
+                  <HudRow
+                    label="RMS:"
+                    value={hudMetrics?.rmsRadius != null ? `${(hudMetrics.rmsRadius * 1000).toFixed(2)} µm` : '—'}
+                    metricId="rms"
+                    highlightedMetric={highlightedMetric}
+                  />
+                )}
                 <HudRow label="Width:" value={hudMetrics?.beamWidth != null ? `${hudMetrics.beamWidth.toFixed(3)} mm` : '—'} metricId="beamWidth" highlightedMetric={highlightedMetric} />
                 <HudRow label="CRA:" value={hudMetrics?.chiefRayAngle != null ? `${hudMetrics.chiefRayAngle.toFixed(2)}°` : '—'} metricId="cra" highlightedMetric={highlightedMetric} />
                 {bestFocusZ != null && (
@@ -908,6 +1145,17 @@ export function OpticalViewport({
                     <span className="text-cyan-electric tabular-nums">
                       {Math.abs(hudZ - bestFocusZ).toFixed(2)} mm
                     </span>
+                  </div>
+                )}
+                {traceResult?.metricsSweep?.length && (
+                  <div className="col-span-2 mt-1.5 pt-1.5 border-t border-white/10">
+                    <div className="text-[10px] text-slate-500 mb-0.5">RMS vs Z</div>
+                    <RmsVsZGraph
+                      sweep={traceResult.metricsSweep}
+                      currentZ={hudZ}
+                      width={120}
+                      height={40}
+                    />
                   </div>
                 )}
               </div>

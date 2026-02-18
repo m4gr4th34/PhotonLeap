@@ -182,6 +182,40 @@ export function SystemProperties({
           </div>
         </section>
 
+        {/* Focus Configuration */}
+        <section className="glass-card p-4">
+          <h3 className="text-sm font-medium text-slate-300 mb-3">Focus Configuration</h3>
+          <div className="flex rounded-lg overflow-hidden border border-white/10 bg-white/5">
+            <button
+              type="button"
+              onClick={() => update({ focusMode: 'On-Axis' })}
+              className={`flex-1 px-3 py-2.5 text-sm font-medium transition-colors ${
+                (systemState.focusMode ?? 'On-Axis') === 'On-Axis'
+                  ? 'bg-cyan-electric/20 text-cyan-electric border-r border-white/10'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+              }`}
+            >
+              Paraxial (On-Axis)
+            </button>
+            <button
+              type="button"
+              onClick={() => update({ focusMode: 'Balanced' })}
+              className={`flex-1 px-3 py-2.5 text-sm font-medium transition-colors ${
+                (systemState.focusMode ?? 'On-Axis') === 'Balanced'
+                  ? 'bg-amber-500/20 text-amber-400 border-l border-white/10'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+              }`}
+            >
+              Best Composite
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {(systemState.focusMode ?? 'On-Axis') === 'Balanced'
+              ? 'Circle of Least Confusion across the entire field of view.'
+              : 'Ignores off-axis aberrations when placing the focus diamond.'}
+          </p>
+        </section>
+
         {/* Performance Card */}
         <section className="glass-card p-4 border-cyan-electric/20">
           <h3 className="text-sm font-medium text-cyan-electric mb-3">Performance</h3>

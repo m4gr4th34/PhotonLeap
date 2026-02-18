@@ -141,6 +141,19 @@ def _interpolate_ray_at_z(ray, z_pos):
     return None, None
 
 
+def _rms_radius(y_vals):
+    """
+    RMS radius using the exact formula: RMS = sqrt(mean(y²) - mean(y)²).
+    Equivalent to sqrt(mean((y_i - ȳ)²)) but numerically consistent.
+    """
+    if len(y_vals) == 0:
+        return None
+    y = np.asarray(y_vals, dtype=float)
+    mean_y2 = float(np.mean(y ** 2))
+    mean_y = float(np.mean(y))
+    return float(np.sqrt(max(0.0, mean_y2 - mean_y ** 2)))
+
+
 def get_metrics_at_z(z_pos, ray_data):
     """
     Compute optical metrics at an arbitrary Z position by interpolating ray data.
@@ -172,8 +185,8 @@ def get_metrics_at_z(z_pos, ray_data):
     n = len(y_vals)
     y_mean = float(np.mean(y_vals))
 
-    # RMS Radius: sqrt(sum((y_i - y_mean)^2) / N) — centroid-based
-    rms_radius = float(np.sqrt(np.mean((y_vals - y_mean) ** 2)))
+    # RMS Radius: sqrt(mean(y²) - mean(y)²) — same formula used for best focus
+    rms_radius = _rms_radius(y_vals)
 
     # Beam Width: max Y - min Y
     beam_width = float(np.max(y_vals) - np.min(y_vals))
@@ -192,10 +205,75 @@ def get_metrics_at_z(z_pos, ray_data):
     }
 
 
-def _precompute_metrics_sweep(rays, num_points=100):
+def _rms_per_field_at_z(rays_by_field, z_pos):
+    """
+    Compute RMS for each field at z_pos.
+    Returns list of RMS values (one per field), using _rms_radius formula.
+    """
+    rms_per_field = []
+    for field_rays in rays_by_field:
+        m = get_metrics_at_z(z_pos, field_rays)
+        r = m.get("rmsRadius") if m else None
+        rms_per_field.append(float(r) if r is not None else float("inf"))
+    return rms_per_field
+
+
+def _global_weighted_rms(rms_per_field, weights):
+    """
+    RMS_global = sqrt(w1*RMS1^2 + w2*RMS2^2 + ...)
+    Weights should sum to 1. Fields with no rays get inf, excluded from sum.
+    """
+    total = 0.0
+    for rms, w in zip(rms_per_field, weights):
+        if rms < 1e10 and w > 0:
+            total += w * (rms ** 2)
+    return float(np.sqrt(total)) if total > 0 else float("inf")
+
+
+def _best_focus_golden_section(
+    rays_by_field,
+    z_lo,
+    z_hi,
+    focus_mode="On-Axis",
+    tol=1e-4,
+    max_iter=50,
+):
+    """
+    Golden Section Search to find Z that minimizes global weighted RMS.
+    focus_mode: 'On-Axis' (100% weight on field 0) or 'Balanced' (equal weights).
+    """
+    n_fields = len(rays_by_field)
+    if focus_mode == "On-Axis":
+        weights = [1.0] + [0.0] * (n_fields - 1) if n_fields else [1.0]
+    else:
+        weights = [1.0 / max(1, n_fields)] * n_fields
+
+    def objective(z):
+        rms_per_field = _rms_per_field_at_z(rays_by_field, z)
+        return _global_weighted_rms(rms_per_field, weights)
+
+    phi = (1 + np.sqrt(5)) / 2
+    z_a, z_b = z_lo, z_hi
+    for _ in range(max_iter):
+        if z_b - z_a <= tol:
+            break
+        z_c = z_b - (z_b - z_a) / phi
+        z_d = z_a + (z_b - z_a) / phi
+        rms_c = objective(z_c)
+        rms_d = objective(z_d)
+        if rms_c < rms_d:
+            z_b = z_d
+        else:
+            z_a = z_c
+    z_mid = (z_a + z_b) / 2
+    return float(z_mid), objective(z_mid)
+
+
+def _precompute_metrics_sweep(rays, num_points=100, rays_by_field=None):
     """
     Pre-compute metrics at num_points Z positions for instant frontend scrubbing.
-    Returns list of {z, rmsRadius, beamWidth, chiefRayAngle, yCentroid, numRays}.
+    Returns list of {z, rmsRadius, beamWidth, chiefRayAngle, yCentroid, numRays, rmsPerField?}.
+    When rays_by_field is provided, each point includes rmsPerField: [rms0, rms1, ...].
     """
     if not rays:
         return []
@@ -208,10 +286,14 @@ def _precompute_metrics_sweep(rays, num_points=100):
     if z_max <= z_min:
         z_max = z_min + 1.0
     z_positions = np.linspace(z_min, z_max, num_points)
-    return [
-        {"z": float(z), **get_metrics_at_z(z, rays)}
-        for z in z_positions
-    ]
+    result = []
+    for z in z_positions:
+        pt = {"z": float(z), **get_metrics_at_z(z, rays)}
+        if rays_by_field and len(rays_by_field) > 0:
+            rms_per = _rms_per_field_at_z(rays_by_field, z)
+            pt["rmsPerField"] = [float(r) if r < 1e10 else None for r in rms_per]
+        result.append(pt)
+    return result
 
 
 def optical_stack_to_surf_data(surfaces):
@@ -250,6 +332,9 @@ def run_trace(optical_stack: dict) -> dict:
     wvl_nm = float(optical_stack.get("wavelengths", [587.6])[0] or 587.6)
     num_rays = int(optical_stack.get("numRays", 9) or 9)
     field_angles = optical_stack.get("fieldAngles", [0])
+    focus_mode = str(optical_stack.get("focusMode", "On-Axis") or "On-Axis")
+    if focus_mode not in ("On-Axis", "Balanced"):
+        focus_mode = "On-Axis"
 
     surf_data_list = optical_stack_to_surf_data(surfaces)
     surface_diameters = [float(s.get("diameter", 25) or 25) for s in surfaces]  # diameter in mm
@@ -265,6 +350,16 @@ def run_trace(optical_stack: dict) -> dict:
         )
     except Exception as e:
         return {"error": str(e), "rays": [], "surfaces": [], "focusZ": 0, "bestFocusZ": 0, "metricsSweep": []}
+
+    # Configure field of view from fieldAngles (degrees)
+    osp = opt_model.optical_spec
+    fov = osp.field_of_view
+    if field_angles and len(field_angles) > 0:
+        fov.set_from_list([float(a) for a in field_angles])
+        if fov.value == 0:
+            fov.value = 1.0  # ensure non-zero max for single on-axis field
+        opt_model.update_model()
+        opt_model.optical_spec.update_optical_properties()
 
     sm = opt_model.seq_model
     tfrms = sm.gbl_tfrms
@@ -301,30 +396,33 @@ def run_trace(optical_stack: dict) -> dict:
         gbl[:, 0] -= z_origin
         surface_curves.append([[float(p[0]), float(p[1])] for p in gbl])
 
-    # Ray polylines
-    fld = osp.field_of_view.fields[0]
+    # Ray polylines — trace each field separately for field-weighted focus
     grid_def = [np.array([-1.0, -1.0]), np.array([1.0, 1.0]), num_rays]
     pupil_coords = list(sampler.grid_ray_generator(grid_def))
-    ray_list = analyses.trace_ray_list(
-        opt_model, pupil_coords, fld, wvl_nm, foc=0.0, check_apertures=True
-    )
-
     extend_left = 50.0
+    rays_by_field = []
     rays = []
-    for _, _, ray_result in ray_list:
-        if ray_result is None:
-            continue
-        ray = ray_result[mc.ray]
-        poly = _ray_to_polyline(
-            ray,
-            tfrms,
-            extend_parallel_back=extend_left,
-            extend_to_focus=True,
-            focus_z=focus_z,
-            z_origin=z_origin,
+    for fld_idx, fld_obj in enumerate(osp.field_of_view.fields):
+        ray_list = analyses.trace_ray_list(
+            opt_model, pupil_coords, fld_obj, wvl_nm, foc=0.0, check_apertures=True
         )
-        if len(poly) > 1:
-            rays.append(poly)
+        field_rays = []
+        for _, _, ray_result in ray_list:
+            if ray_result is None:
+                continue
+            ray = ray_result[mc.ray]
+            poly = _ray_to_polyline(
+                ray,
+                tfrms,
+                extend_parallel_back=extend_left,
+                extend_to_focus=True,
+                focus_z=focus_z,
+                z_origin=z_origin,
+            )
+            if len(poly) > 1:
+                field_rays.append(poly)
+                rays.append(poly)
+        rays_by_field.append(field_rays)
 
     # Performance
     spot_xy, dxdy = run_spot_diagram(opt_model, num_rays=num_rays, fld=0, wvl=wvl_nm)
@@ -335,19 +433,20 @@ def run_trace(optical_stack: dict) -> dict:
     total_length = float(sum(s[1] for s in surf_data_list))
     f_number = float(fod.fno) if fod and fod.efl != 0 else 0.0
 
-    metrics_sweep = _precompute_metrics_sweep(rays, num_points=100)
+    metrics_sweep = _precompute_metrics_sweep(rays, num_points=100, rays_by_field=rays_by_field)
 
-    # Best Focus: Z where RMS spot radius is minimum (between last lens and image plane)
-    # Use global Z from rayoptics tfrms, not thickness-based calculation
+    # Best Focus: Golden Section Search — field-weighted RMS when focus_mode='Balanced'
     last_lens_z_global = tfrms[-2][1][2] if len(tfrms) >= 2 else 0.0
-    last_lens_z = last_lens_z_global - z_origin  # same coord system as rays
-    candidates = [
-        p for p in metrics_sweep
-        if p["z"] >= last_lens_z and p["z"] <= focus_z and p.get("rmsRadius") is not None
-    ]
-    if candidates:
-        best_focus = min(candidates, key=lambda p: p["rmsRadius"])
-        best_focus_z = float(best_focus["z"])
+    last_lens_z = last_lens_z_global - z_origin
+    if rays and last_lens_z < focus_z:
+        try:
+            # Fallback: if no field structure, treat all rays as single field
+            rbf = rays_by_field if rays_by_field else [rays]
+            best_focus_z, _ = _best_focus_golden_section(
+                rbf, last_lens_z, focus_z, focus_mode=focus_mode
+            )
+        except Exception:
+            best_focus_z = float(focus_z)
     else:
         best_focus_z = float(focus_z)
 

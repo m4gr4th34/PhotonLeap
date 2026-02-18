@@ -16,6 +16,8 @@ export type MetricsAtZ = {
   chiefRayAngle: number | null
   yCentroid: number | null
   numRays: number
+  /** Per-field RMS (mm) — one per field angle, for field-weighted HUD */
+  rmsPerField?: (number | null)[]
 }
 
 export type TraceResult = {
@@ -30,11 +32,14 @@ export type TraceResult = {
 
 import { config } from '../config'
 
+export type FocusMode = 'On-Axis' | 'Balanced'
+
 export type SystemState = {
   entrancePupilDiameter: number
   wavelengths: number[]
   fieldAngles: number[]
   numRays: number
+  focusMode: FocusMode
   hasTraced: boolean
   surfaces: Surface[]
   // Performance (computed or from trace)
@@ -75,6 +80,7 @@ export const DEFAULT_SYSTEM_STATE: SystemState = {
   wavelengths: [...config.defaults.wavelengths],
   fieldAngles: [...config.defaults.fieldAngles],
   numRays: config.defaults.numRays,
+  focusMode: 'On-Axis',
   hasTraced: false,
   surfaces: [
     {

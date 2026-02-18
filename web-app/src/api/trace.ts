@@ -4,7 +4,7 @@
  * Surface shape matches types/system.Surface (single source of truth).
  */
 
-import type { Surface } from '../types/system'
+import type { Surface, FocusMode } from '../types/system'
 import { config } from '../config'
 
 export type TraceResponse = {
@@ -25,6 +25,7 @@ export type TraceResponse = {
     chiefRayAngle: number | null
     yCentroid: number | null
     numRays: number
+    rmsPerField?: (number | null)[]
   }>
   error?: string
 }
@@ -37,9 +38,11 @@ export async function traceOpticalStack(optical_stack: {
   wavelengths: number[]
   fieldAngles: number[]
   numRays: number
+  focusMode?: FocusMode
 }): Promise<TraceResponse> {
   const payload = {
     ...optical_stack,
+    focusMode: optical_stack.focusMode ?? 'On-Axis',
     surfaces: optical_stack.surfaces.map((s) => ({
       id: s.id,
       type: s.type,

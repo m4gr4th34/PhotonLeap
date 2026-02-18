@@ -51,6 +51,7 @@ class OpticalStackRequest(BaseModel):
     wavelengths: list[float] = [587.6]
     fieldAngles: list[float] = [0]
     numRays: int = 9
+    focusMode: str = "On-Axis"  # 'On-Axis' | 'Balanced'
 
 
 @app.post("/api/trace")
