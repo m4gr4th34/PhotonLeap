@@ -10,7 +10,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=rayoptics_datas,
-    hiddenimports=['singlet_rayoptics', 'optics_visualization'],
+    hiddenimports=['singlet_rayoptics', 'optics_visualization', 'WebKit'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -45,4 +45,7 @@ app = BUNDLE(
     name='gui.app',
     icon=None,
     bundle_identifier=None,
+    info_plist={
+        'LSBackgroundOnly': False,  # App must appear in Dock so user doesn't relaunch
+    },
 )

@@ -2,16 +2,21 @@
 """
 Generate a 2D visualization of the optical setup: lenses, wave propagation,
 and traced rays extending to the focal point.
+Uses Plotly (graph_objects) for modern, interactive rendering.
 """
 
+import io
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 from rayoptics.optical import model_constants as mc
 from rayoptics.raytr import sampler
 from rayoptics.raytr import analyses
+
+
+# Light blue glass color with 0.3 opacity
+LENS_FILL = "rgba(135, 206, 235, 0.3)"  # light blue, semi-transparent
+LENS_LINE = "rgba(44, 82, 130, 0.8)"
 
 
 def _profile_points(ifc, sd, n_pts=31):
@@ -91,20 +96,39 @@ def _ray_to_polyline(ray, tfrms, extend_parallel_back=50.0, extend_to_focus=True
     return pts
 
 
+def _ray_slope_intercept(poly):
+    """Compute slope (dy/dz) and y-intercept for a ray polyline. Uses first two points."""
+    if len(poly) < 2:
+        return None, None
+    z1, y1 = poly[0, 0], poly[0, 1]
+    z2, y2 = poly[1, 0], poly[1, 1]
+    dz = z2 - z1
+    if abs(dz) < 1e-12:
+        return None, y1
+    slope = (y2 - y1) / dz
+    y_intercept = y1 - slope * z1
+    return slope, y_intercept
+
+
 def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
-                          figsize=(10, 5), dpi=100):
+                          figsize=(10, 5), dpi=100, template="plotly_white", return_html=False):
     """
     Render optical layout: filled lens elements, wave propagation (wavefronts),
     traced rays, extending to the focal point.
-    Uses first real surface as z=0 to avoid object-at-infinity scale issues.
+    Uses Plotly graph_objects for modern, interactive visualization.
+
+    Styling:
+    - Lenses: light blue semi-transparent glass (opacity=0.3)
+    - Rays: individual traces with hover showing slope and y-intercept
+    - Focus: glowing red dot with halo effect
+    - Grid: subtle dot grid (gridcolor='lightgray')
+    - Fixed 1:1 aspect ratio for y and z axes
+    - Template: 'plotly_white' (default) or 'plotly_dark'
     """
     sm = opt_model.seq_model
     osp = opt_model.optical_spec
     wvl = wvl_nm or osp.spectral_region.central_wvl
     tfrms = sm.gbl_tfrms
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    ax.set_facecolor('#fafafa')
 
     z_origin = tfrms[1][1][2] if len(tfrms) > 1 else 0
     try:
@@ -118,10 +142,11 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     last_surf_z = tfrms[-2][1][2] if len(tfrms) >= 2 else tfrms[-1][1][2]
     image_plane_z = tfrms[-1][1][2] - z_origin if tfrms else 0
 
-    # Focal point: where rays converge. Use last axial-ray crossing (final focus)
-    # when BFL > 0; use first crossing (intermediate) when BFL < 0 (virtual focus).
+    # Focal point
     focus_z = None
-    if parax is not None and len(parax) >= 1:
+    if bfl > 0:
+        focus_z = last_surf_z + bfl - z_origin
+    elif parax is not None and len(parax) >= 1:
         ax_ray = parax[0]
         crossings = []
         for i in range(1, min(len(ax_ray), len(tfrms)) - 1):
@@ -135,7 +160,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
                     z_cross = (z0 + z1) / 2
                 crossings.append(z_cross)
         if crossings:
-            focus_z = crossings[-1] if bfl > 0 else crossings[0]
+            focus_z = crossings[0]
     if focus_z is None:
         focus_z = (last_surf_z + bfl - z_origin) if bfl > 0 else image_plane_z
 
@@ -143,7 +168,9 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
     y_extent = 5.0
     lens_idx = 0
 
-    # 1. Draw lens elements as filled polygons (glass regions)
+    fig = go.Figure()
+
+    # 1. Lens elements as filled polygons (glass look, opacity=0.3)
     for i in range(len(sm.ifcs) - 1):
         if i >= len(tfrms) or i >= len(sm.gaps):
             break
@@ -176,12 +203,20 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         gbl1[:, 0] -= z_origin
         gbl2[:, 0] -= z_origin
         poly = np.vstack([gbl1, gbl2[::-1]])
-        ax.fill(poly[:, 0], poly[:, 1], color='#87ceeb', alpha=0.5,
-                edgecolor='#2c5282', linewidth=1.5, zorder=3)
+        # Close polygon for fill='toself'
+        poly_closed = np.vstack([poly, poly[0:1]])
+
+        fig.add_trace(go.Scatter(
+            x=poly_closed[:, 0],
+            y=poly_closed[:, 1],
+            mode="lines",
+            fill="toself",
+            fillcolor=LENS_FILL,
+            line=dict(color=LENS_LINE, width=1.5),
+            name=f"Lens {lens_idx + 1}",
+            showlegend=False,
+        ))
         lens_idx += 1
-        lens_z = (gbl1[0, 0] + gbl2[0, 0]) / 2
-        ax.text(lens_z, 0, 'Lens {}'.format(lens_idx), fontsize=8,
-                color='#2c5282', ha='center', va='center', zorder=7)
 
         for z_pos in [tfrms[i][1][2], tfrms[i + 1][1][2]]:
             if abs(z_pos) <= 1e6:
@@ -190,7 +225,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
                 z_max = max(z_max, z_d + sd)
         y_extent = max(y_extent, sd * 1.3)
 
-    # 2. Draw surface outlines (for any surfaces not part of filled lens)
+    # 2. Surface outlines
     for i, ifc in enumerate(sm.ifcs):
         if i >= len(tfrms):
             break
@@ -209,7 +244,14 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         rot, trns = tfrms[i]
         gbl = _transform_profile(pts, rot, trns)
         gbl[:, 0] -= z_origin
-        ax.plot(gbl[:, 0], gbl[:, 1], 'k-', linewidth=1.2, zorder=4)
+        fig.add_trace(go.Scatter(
+            x=gbl[:, 0],
+            y=gbl[:, 1],
+            mode="lines",
+            line=dict(color="rgba(0,0,0,0.8)", width=1.2),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
 
     for i in range(len(tfrms)):
         z_pos = tfrms[i][1][2]
@@ -233,14 +275,9 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         check_apertures=True
     )
 
-    # 4. Draw wave propagation: input wavefront (vertical line)
     wavefront_z = -extend_left * 0.5
-    ax.axvline(wavefront_z, color='#3b82f6', linestyle='-', linewidth=1.2,
-               alpha=0.7, zorder=2)
 
     def _ray_inside_all_apertures(ray):
-        """Return True if ray intersection at every surface is within aperture.
-        Uses global coords for radial distance from optical axis (z)."""
         for i, seg in enumerate(ray):
             if i >= len(sm.ifcs) or i >= len(tfrms):
                 break
@@ -260,7 +297,7 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
         return True
 
     ray_polys = []
-    for _, _, ray_result in ray_list:
+    for ray_idx, (_, _, ray_result) in enumerate(ray_list):
         if ray_result is None:
             continue
         ray = ray_result[mc.ray]
@@ -271,60 +308,134 @@ def render_optical_layout(opt_model, wvl_nm=None, num_rays=9, output_path=None,
                                 z_origin=z_origin)
         if len(poly) > 1:
             ray_polys.append(poly)
-            ax.plot(poly[:, 0], poly[:, 1], color='#2563eb', alpha=0.7,
-                    linewidth=1.0, zorder=5)
+            slope, y_int = _ray_slope_intercept(poly)
+            slope_str = f"{slope:.4f}" if slope is not None else "—"
+            y_int_str = f"{y_int:.4f} mm" if y_int is not None else "—"
+            hover = f"Ray {ray_idx + 1}<br>Slope: {slope_str}<br>y-intercept: {y_int_str}"
+            fig.add_trace(go.Scatter(
+                x=poly[:, 0],
+                y=poly[:, 1],
+                mode="lines",
+                line=dict(color="rgba(37, 99, 235, 0.8)", width=1.2),
+                name=f"Ray {ray_idx + 1}",
+                customdata=[[slope_str, y_int_str]],
+                hovertemplate=hover + "<extra></extra>",
+                showlegend=False,
+            ))
 
-    # Extend y_extent to include all rays
     if ray_polys:
         max_ray_y = max(np.max(np.abs(p[:, 1])) for p in ray_polys)
         y_extent = max(y_extent, max_ray_y * 1.2, 5.0)
 
-    # 5. Draw output wavefront (spherical, converging/diverging) as arc
+    # 4. Input wavefront (vertical line)
+    fig.add_trace(go.Scatter(
+        x=[wavefront_z, wavefront_z],
+        y=[-y_extent, y_extent],
+        mode="lines",
+        line=dict(color="rgba(59, 130, 246, 0.7)", width=1.2),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+
+    # 5. Output wavefront arc
     if focus_z is not None and len(ray_polys) > 0:
         r = abs(bfl) * 0.3
         theta = np.linspace(-np.pi / 2.5, np.pi / 2.5, 25)
         wf_z = focus_z - r * np.cos(theta)
         wf_y = r * np.sin(theta)
-        ax.plot(wf_z, wf_y, color='#059669', linestyle='-', linewidth=1.2,
-                alpha=0.8, zorder=2)
+        fig.add_trace(go.Scatter(
+            x=wf_z,
+            y=wf_y,
+            mode="lines",
+            line=dict(color="rgba(5, 150, 105, 0.8)", width=1.2),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
 
-    # 6. Focal point marker
-    ax.axvline(focus_z, color='#dc2626', linestyle='--', linewidth=1.0,
-               alpha=0.8, zorder=2)
-    ax.scatter([focus_z], [0], color='#dc2626', s=30, zorder=6, marker='o')
+    # 6. Optical axis
+    fig.add_trace(go.Scatter(
+        x=[z_min, z_max],
+        y=[0, 0],
+        mode="lines",
+        line=dict(color="rgba(107, 114, 128, 0.6)", width=0.8, dash="dot"),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
 
-    ax.axhline(0, color='#6b7280', linestyle='--', linewidth=0.8, zorder=1)
-
-    # 7. Labels
-    ax.text(wavefront_z - 5, y_extent * 0.85, 'Input\nwavefront',
-            fontsize=8, color='#3b82f6', ha='right', va='top')
-    if ray_polys:
-        mid_z = (wavefront_z + focus_z) / 2
-        ax.text(mid_z, y_extent * 0.9, 'Rays', fontsize=8, color='#2563eb',
-                ha='center', va='top')
-    ax.text(focus_z + 5, 0, 'Focus', fontsize=8, color='#dc2626',
-            ha='left', va='center')
-    if focus_z is not None and len(ray_polys) > 0:
-        wf_mid_z = focus_z - abs(bfl) * 0.15
-        ax.text(wf_mid_z, y_extent * 0.85, 'Output\nwavefront',
-                fontsize=8, color='#059669', ha='center', va='top')
+    # 7. Focal point: halo + glowing dot
+    halo_size = 20
+    fig.add_trace(go.Scatter(
+        x=[focus_z],
+        y=[0],
+        mode="markers",
+        marker=dict(
+            size=halo_size,
+            color="rgba(220, 38, 38, 0.35)",
+            line=dict(width=0),
+            symbol="circle",
+        ),
+        name="Focus (halo)",
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[focus_z],
+        y=[0],
+        mode="markers",
+        marker=dict(
+            size=10,
+            color="rgb(220, 38, 38)",
+            line=dict(width=2, color="rgba(255, 100, 100, 0.8)"),
+            symbol="circle",
+        ),
+        name="Focus",
+        hovertemplate="Focus<br>z = %{x:.2f} mm<extra></extra>",
+        showlegend=False,
+    ))
 
     z_margin = (z_max - z_min) * 0.02 if z_max > z_min else 1.0
-    ax.set_xlim(z_min - z_margin, z_max + z_margin)
-    ax.set_ylim(-y_extent, y_extent)
-    ax.set_xlabel('z (mm)')
-    ax.set_ylabel('y (mm)')
-    ax.set_title('Optical layout: lenses, wave propagation, rays to focus')
-    ax.set_aspect('auto')
-    plt.tight_layout()
+    x_range = [z_min - z_margin, z_max + z_margin]
+    y_range = [-y_extent, y_extent]
 
+    # Layout: modern grid, fixed aspect, template
+    fig.update_layout(
+        template=template,
+        xaxis=dict(
+            title="z (mm)",
+            range=x_range,
+            scaleanchor="y",
+            scaleratio=1,
+            gridcolor="lightgray",
+            griddash="dot",
+            zeroline=False,
+            showgrid=True,
+        ),
+        yaxis=dict(
+            title="y (mm)",
+            range=y_range,
+            gridcolor="lightgray",
+            griddash="dot",
+            zeroline=False,
+            showgrid=True,
+        ),
+        plot_bgcolor="white" if template == "plotly_white" else None,
+        paper_bgcolor="white" if template == "plotly_white" else None,
+        margin=dict(l=60, r=40, t=50, b=50),
+        title="Optical layout: lenses, wave propagation, rays to focus",
+        showlegend=False,
+    )
+
+    # Export: HTML for WebView (no Kaleido) or PNG for file/tests
+    width_px = int(figsize[0] * dpi)
+    height_px = int(figsize[1] * dpi)
+
+    if return_html:
+        # to_html() needs no Kaleido/Chromium - safe for embedded WebView
+        return fig.to_html(include_plotlyjs=True, full_html=True,
+                          config={"responsive": True})
     if output_path:
-        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
-        plt.close(fig)
+        fig.write_image(output_path, width=width_px, height=height_px, scale=1)
         return output_path
-    else:
-        import io
-        buf = io.BytesIO()
-        fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
-        plt.close(fig)
-        return buf.getvalue()
+    buf = io.BytesIO()
+    fig.write_image(buf, format="png", width=width_px, height=height_px, scale=1)
+    return buf.getvalue()

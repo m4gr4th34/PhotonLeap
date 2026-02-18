@@ -1,3 +1,5 @@
 venv/
 __pycache__/
 dist/
+.pytest_cache/
+test_run.log

@@ -39,6 +39,8 @@ pandas==2.3.3
 parso==0.8.6
 pexpect==4.9.0
 pillow==11.3.0
+plotly>=5.0
+kaleido>=0.2.0
 platformdirs==4.4.0
 prompt_toolkit==3.0.52
 psutil==7.2.2
@@ -46,9 +48,11 @@ ptyprocess==0.7.0
 pure_eval==0.2.3
 Pygments==2.19.2
 pyinstaller==6.19.0
+pytest>=7.0
 pyinstaller-hooks-contrib==2026.0
 pyobjc-core==11.1
 pyobjc-framework-Cocoa==11.1
+pyobjc-framework-WebKit==11.1
 pyparsing==3.3.2
 PyQt5==5.15.11
 PyQt5-Qt5==5.15.18

@@ -8,6 +8,7 @@ Starts with 10 surfaces; right-click any surface to add more (no limit).
 import sys
 import os
 import json
+import threading
 
 # Ensure script directory is on path so lazy-import finds singlet_rayoptics and optics_visualization.
 if getattr(sys, "frozen", False):
@@ -30,8 +31,6 @@ from AppKit import (
     NSButton,
     NSScrollView,
     NSTextView,
-    NSImageView,
-    NSImage,
     NSMenu,
     NSMenuItem,
     NSMakeRect,
@@ -50,6 +49,7 @@ from AppKit import (
     NSModalResponseOK,
 )
 from Foundation import NSObject, NSString, NSRunLoop, NSDate
+from WebKit import WKWebView, WKWebViewConfiguration
 
 # singlet_rayoptics is imported lazily when Calculate is clicked (avoids startup
 # crashes from heavy deps when launching the .app from Finder).
@@ -104,48 +104,13 @@ def _show_result_alert(title, message):
     alert.runModal()
 
 
-def parse_material(s):
-    """Parse material string 'n' or 'n,V' -> (n, V). Default V=0."""
-    s = (s or "").strip()
-    if not s:
-        return 1.0, 0.0
-    parts = [p.strip() for p in s.replace(",", " ").split()]
-    n = float(parts[0]) if parts else 1.0
-    v = float(parts[1]) if len(parts) > 1 else 0.0
-    return n, v
-
-
-def parse_radius(s):
-    """Parse radius (mm). 0 or empty -> curvature 0 (flat)."""
-    s = (s or "").strip()
-    if not s:
-        return 0.0
-    r = float(s)
-    if r == 0:
-        return 0.0
-    return 1.0 / r
-
-
-def parse_thickness(s):
-    """Parse thickness (mm)."""
-    s = (s or "").strip()
-    return float(s) if s else 0.0
-
-
-def parse_wavelength(s):
-    """Parse wavelength (nm). Default 587.6 (d-line)."""
-    s = (s or "").strip()
-    if not s:
-        return 587.6
-    return float(s)
-
-
-def parse_diameter(s):
-    """Parse diameter (mm). None if empty (use model default)."""
-    s = (s or "").strip()
-    if not s:
-        return None
-    return float(s)
+from parsing import (
+    parse_material,
+    parse_radius,
+    parse_thickness,
+    parse_wavelength,
+    parse_diameter,
+)
 
 
 def _get_field_values(r_f, t_f, m_f, d_f, desc_f):
@@ -320,6 +285,12 @@ class OpticsAppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, notification):
         self.window.makeKeyAndOrderFront_(None)
 
+    def applicationShouldHandleReopen_hasVisibleWindows_(self, sender, flag):
+        """Bring our window to front when user clicks Dock icon; prevents launching a new instance."""
+        if self.window:
+            self.window.makeKeyAndOrderFront_(None)
+        return True
+
 
 def main():
     app = NSApplication.sharedApplication()
@@ -448,14 +419,14 @@ def main():
     scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
     content.addSubview_(scroll)
 
-    # Visualization image (optical layout + rays) - top fixed below results, grows down with window
+    # Visualization (Plotly in embedded WebView) - top fixed below results, grows down with window
     viz_h = results_y - margin - 20
     viz_y = margin
-    image_view = NSImageView.alloc().initWithFrame_(NSMakeRect(margin, viz_y, width - 2 * margin, viz_h))
-    image_view.setImageScaling_(1)  # NSImageScaleProportionallyUpOrDown
-    image_view.setImageFrameStyle_(1)  # NSImageFrameGrayBezel
-    image_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin)
-    content.addSubview_(image_view)
+    viz_frame = NSMakeRect(margin, viz_y, width - 2 * margin, viz_h)
+    web_config = WKWebViewConfiguration.alloc().init()
+    web_view = WKWebView.alloc().initWithFrame_configuration_(viz_frame, web_config)
+    web_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin)
+    content.addSubview_(web_view)
 
     content.addSubview_(button)
     content.addSubview_(save_btn)
@@ -535,21 +506,36 @@ def main():
                     _show_result_alert("Load Error", str(e))
 
     def on_calculate_clicked(sender):
-        """Calculate button action: read inputs -> call rayoptics -> update result area."""
-        try:
-            _on_calculate_impl(sender)
-        except Exception as e:
-            _debug("TOP-LEVEL ERROR: " + str(e))
-            import traceback
-            tb = traceback.format_exc()
-            _debug(tb)
-            _set_results_text(results_text, "Error: " + str(e))
-            _show_result_alert("Error", str(e))
-            window.makeKeyAndOrderFront_(None)
+        """Calculate button action: run calculation on background thread to keep main thread responsive."""
+        def run_in_background():
+            try:
+                result = _on_calculate_impl(
+                    inputs, wvl_field, table_ctrl, parse_radius, parse_thickness,
+                    parse_material, parse_wavelength, parse_diameter
+                )
+                # Update UI on main thread (required for AppKit)
+                target.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "finishCalculation:", result, False
+                )
+            except Exception as e:
+                _debug("TOP-LEVEL ERROR: " + str(e))
+                import traceback
+                tb = traceback.format_exc()
+                _debug(tb)
+                err_result = {"output": "Error: " + str(e), "viz_html": None, "error": True}
+                target.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "finishCalculation:", err_result, False
+                )
 
-    def _on_calculate_impl(sender):
-        """Inner implementation of Calculate action."""
-        # Clear debug log and show immediate feedback
+        # Disable button during calculation
+        button.setEnabled_(False)
+        _set_results_text(results_text, "Calculating...")
+        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        threading.Thread(target=run_in_background, daemon=True).start()
+
+    def _on_calculate_impl(inputs_ref, wvl_field_ref, table_ctrl_ref, parse_radius_fn, parse_thickness_fn,
+                           parse_material_fn, parse_wavelength_fn, parse_diameter_fn):
+        """Inner implementation of Calculate action. Runs on background thread. Returns dict with output and viz_html."""
         try:
             for path in ["/tmp/gui_debug.txt", os.path.expanduser("~/gui_debug.txt")]:
                 try:
@@ -561,15 +547,12 @@ def main():
         except Exception:
             pass
         _debug("Starting calculation flow")
-        _set_results_text(results_text, "Calculating...")
-        # Yield to run loop so "Calculating..." is drawn before we block on import
-        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
 
         # 1. Read inputs from the text fields (skip fully empty rows)
         _debug("Reading inputs")
         surf_data_list = []
         surface_diameters = []
-        for r_f, t_f, m_f, d_f, desc_f in inputs:
+        for r_f, t_f, m_f, d_f, desc_f in inputs_ref:
             radius_str = (r_f.stringValue() or "").strip()
             thickness_str = (t_f.stringValue() or "").strip()
             material_str = (m_f.stringValue() or "").strip()
@@ -577,20 +560,18 @@ def main():
             if not radius_str and not thickness_str and not material_str:
                 continue
             try:
-                curvature = parse_radius(radius_str if radius_str else "0")
-                thickness = parse_thickness(thickness_str if thickness_str else "0")
-                n, v = parse_material(material_str if material_str else "1")
+                curvature = parse_radius_fn(radius_str if radius_str else "0")
+                thickness = parse_thickness_fn(thickness_str if thickness_str else "0")
+                n, v = parse_material_fn(material_str if material_str else "1")
                 surf_data_list.append([curvature, thickness, n, v])
-                surface_diameters.append(parse_diameter(diameter_str))
+                surface_diameters.append(parse_diameter_fn(diameter_str))
             except Exception as e:
                 msg = "Invalid input: {}.\n\nCheck radius, thickness, material (n or n,V), and diameter.".format(e)
-                _set_results_text(results_text, msg)
                 _debug("Invalid input: " + str(e))
-                return
+                return {"output": msg, "viz_html": None, "error": True}
         if not surf_data_list:
-            _set_results_text(results_text, "Enter at least one surface.")
             _debug("No surfaces")
-            return
+            return {"output": "Enter at least one surface.", "viz_html": None, "error": True}
         # If only one surface given, add symmetric back surface (singlet lens)
         if len(surf_data_list) == 1:
             c, t, n, v = surf_data_list[0]
@@ -599,14 +580,13 @@ def main():
 
         # Parse wavelength (nm)
         try:
-            wvl_nm = parse_wavelength(wvl_field.stringValue())
+            wvl_nm = parse_wavelength_fn(wvl_field_ref.stringValue())
             if wvl_nm <= 0 or wvl_nm > 2000:
                 raise ValueError("Wavelength must be between 1 and 2000 nm")
         except Exception as e:
             msg = "Invalid wavelength: {}.\n\nEnter wavelength in nm (e.g. 587.6 for d-line).".format(e)
-            _set_results_text(results_text, msg)
             _debug("Invalid wavelength: " + str(e))
-            return
+            return {"output": msg, "viz_html": None, "error": True}
 
         # 2. Pass that data to the rayoptics function (lazy import for .app launch)
         _debug("About to import singlet_rayoptics")
@@ -650,15 +630,11 @@ def main():
                 sys.modules["rayoptics.gui.appcmds"] = stub
 
             from singlet_rayoptics import calculate_and_format_results
-            from optics_visualization import render_optical_layout
             _debug("Import OK")
         except ImportError as e:
             _debug("Import failed: " + str(e))
             msg = "Could not load ray-optics module.\n\nImport error: {}".format(e)
-            _set_results_text(results_text, msg)
-            _show_result_alert("Import Error", msg)
-            window.makeKeyAndOrderFront_(None)
-            return
+            return {"output": msg, "viz_html": None, "error": True}
         _debug("About to run calculation")
         opt_model = None
         try:
@@ -670,52 +646,41 @@ def main():
         except Exception as e:
             _debug("Calculation exception: " + str(e))
             output = "Calculation error: {}".format(e)
-            image_view.setImage_(None)
 
-        # Update visualization if we have a valid model
+        viz_html = None
         if opt_model is not None:
             try:
-                import tempfile
-                _fd, viz_path = tempfile.mkstemp(suffix=".png", prefix="optics_")
-                os.close(_fd)
-                render_optical_layout(
+                from optics_visualization import render_optical_layout
+                viz_html = render_optical_layout(
                     opt_model, wvl_nm=wvl_nm, num_rays=11,
-                    output_path=viz_path, figsize=(8, 4), dpi=100
+                    figsize=(8, 4), dpi=100, return_html=True
                 )
-                ns_img = NSImage.alloc().initWithContentsOfFile_(viz_path)
-                try:
-                    os.remove(viz_path)
-                except OSError:
-                    pass
-                if ns_img is not None:
-                    image_view.setImage_(None)
-                    image_view.setImage_(ns_img)
-                    image_view.setNeedsDisplay_(True)
-                    image_view.displayIfNeeded()
-                    w = image_view.window()
-                    if w is not None:
-                        w.displayIfNeeded()
-                    _debug("Visualization updated")
+                _debug("Visualization HTML generated")
             except Exception as viz_err:
                 _debug("Visualization failed: " + str(viz_err))
 
-        # 3. Update the result text area with the output
         if not (output and str(output).strip()):
             output = "No output from calculation."
         _debug("About to set results text")
-        _set_results_text(results_text, output)
-        results_text.scrollRangeToVisible_((0, 1))
-        # Fallback: write to Desktop so user can open file if GUI doesn't show
-        try:
-            desktop = os.path.join(os.path.expanduser("~"), "Desktop", "lens_results.txt")
-            with open(desktop, "w", encoding="utf-8") as f:
-                f.write(output)
-            _debug("Wrote to " + desktop)
-        except Exception as e:
-            _debug("Could not write to Desktop: " + str(e))
-        window.makeKeyAndOrderFront_(None)
+        return {"output": output, "viz_html": viz_html, "error": False}
 
     class ButtonTarget(NSObject):
+        def init(self):
+            self = objc.super(ButtonTarget, self).init()
+            if self is None:
+                return None
+            self._button = None
+            self._results_text = None
+            self._web_view = None
+            self._window = None
+            return self
+
+        def setButton_resultsText_webView_window_(self, btn, results, wv, win):
+            self._button = btn
+            self._results_text = results
+            self._web_view = wv
+            self._window = win
+
         def calculate_(self, sender):
             on_calculate_clicked(sender)
 
@@ -725,7 +690,38 @@ def main():
         def load_(self, sender):
             on_load_clicked(sender)
 
+        def finishCalculation_(self, result):
+            """Called on main thread to update UI with calculation results."""
+            if self._button:
+                self._button.setEnabled_(True)
+            if result.get("error"):
+                _set_results_text(self._results_text, result["output"])
+                _show_result_alert("Error", result["output"])
+            else:
+                _set_results_text(self._results_text, result["output"])
+                if self._results_text:
+                    self._results_text.scrollRangeToVisible_((0, 1))
+                viz_html = result.get("viz_html")
+                if viz_html and self._web_view:
+                    try:
+                        self._web_view.loadHTMLString_baseURL_(
+                            NSString.stringWithString_(viz_html), None
+                        )
+                        self._web_view.setNeedsDisplay_(True)
+                        self._web_view.displayIfNeeded()
+                    except Exception as e:
+                        _debug("Failed to load viz HTML: " + str(e))
+                try:
+                    desktop = os.path.join(os.path.expanduser("~"), "Desktop", "lens_results.txt")
+                    with open(desktop, "w", encoding="utf-8") as f:
+                        f.write(result["output"])
+                except Exception:
+                    pass
+            if self._window:
+                self._window.makeKeyAndOrderFront_(None)
+
     target = ButtonTarget.alloc().init()
+    target.setButton_resultsText_webView_window_(button, results_text, web_view, window)
     button.setTarget_(target)
     button.setAction_("calculate:")
     save_btn.setTarget_(target)
