@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Plus, Trash2, Download, Upload } from 'lucide-react'
 import type { SystemState, Surface } from '../types/system'
 import {
   MATERIAL_PRESETS,
@@ -10,6 +10,7 @@ import {
 type SystemEditorProps = {
   systemState: SystemState
   onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
+  onLoadComplete?: (fileName: string) => void
 }
 
 const inputClass =
@@ -92,6 +93,82 @@ function MaterialSelect({
   )
 }
 
+const APP_VERSION = '0.0.0'
+
+/** Save design using File System Access API for native "Save As" experience. */
+async function saveDesign(systemState: SystemState): Promise<void> {
+  const data = {
+    optical_stack: {
+      surfaces: systemState.surfaces,
+      numRays: systemState.numRays,
+    },
+    system_parameters: {
+      entrancePupilDiameter: systemState.entrancePupilDiameter,
+      wavelengths: systemState.wavelengths,
+      fieldAngles: systemState.fieldAngles,
+    },
+    system_properties: {
+      totalLength: systemState.totalLength,
+      fNumber: systemState.fNumber,
+      rmsSpotRadius: systemState.rmsSpotRadius,
+    },
+    metadata: {
+      savedAt: new Date().toISOString(),
+      appVersion: APP_VERSION,
+    },
+  }
+  const json = JSON.stringify(data, null, 2)
+
+  if (!('showSaveFilePicker' in window)) {
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'my_optical_design.json'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    return
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handle = await (window as any).showSaveFilePicker({
+      suggestedName: 'my_optical_design.json',
+      types: [
+        {
+          description: 'JSON Files',
+          accept: { 'application/json': ['.json'] },
+        },
+      ],
+    })
+    const writable = await handle.createWritable()
+    await writable.write(json)
+    await writable.close()
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return
+    }
+    throw err
+  }
+}
+
+/** Normalize a loaded surface to ensure all fields exist. */
+function normalizeSurface(s: Partial<Surface> & { n?: number }, index: number): Surface {
+  const n = Number(s.refractiveIndex ?? s.n ?? 1) || 1
+  return {
+    id: s.id ?? `s-${Date.now()}-${index}`,
+    type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
+    radius: Number(s.radius) || 0,
+    thickness: Number(s.thickness) || 10,
+    refractiveIndex: n,
+    diameter: Number(s.diameter) || 25,
+    material: String(s.material ?? 'Air'),
+    description: String(s.description ?? ''),
+  }
+}
+
 /** Create a new surface. Defaults to Air (n=1.0) so the physics engine knows the ray medium. */
 function createSurface(id: string): Surface {
   return {
@@ -106,9 +183,113 @@ function createSurface(id: string): Surface {
   }
 }
 
-export function SystemEditor({ systemState, onSystemStateChange }: SystemEditorProps) {
+type LoadedStack = {
+  surfaces?: unknown[]
+  numRays?: number
+  entrancePupilDiameter?: number
+  wavelengths?: unknown
+  fieldAngles?: unknown
+}
+
+type LoadedParams = {
+  entrancePupilDiameter?: number
+  wavelengths?: unknown
+  fieldAngles?: unknown
+}
+
+function applyLoadedData(
+  data: unknown,
+  onSystemStateChange: SystemEditorProps['onSystemStateChange']
+) {
+  const raw = data as {
+    optical_stack?: LoadedStack
+    system_parameters?: LoadedParams
+    system_properties?: { totalLength?: number; fNumber?: number; rmsSpotRadius?: number }
+  }
+  const stack: LoadedStack = raw.optical_stack ?? (raw as unknown as LoadedStack)
+  const params: LoadedParams = raw.system_parameters ?? stack
+  const props = raw.system_properties ?? {}
+
+  const loadedSurfaces = Array.isArray(stack.surfaces) ? stack.surfaces : []
+  const normalizedSurfaces = loadedSurfaces.map((s: unknown, i: number) =>
+    normalizeSurface(s as Partial<Surface> & { n?: number }, i)
+  )
+
+  const entrancePupilDiameter =
+    Number(params.entrancePupilDiameter ?? stack.entrancePupilDiameter) || 10
+  const wavelengthsArr = params.wavelengths ?? stack.wavelengths
+  const wavelengths = Array.isArray(wavelengthsArr) ? wavelengthsArr.map(Number) : undefined
+  const fieldAnglesArr = params.fieldAngles ?? stack.fieldAngles
+  const fieldAngles = Array.isArray(fieldAnglesArr) ? fieldAnglesArr.map(Number) : undefined
+
+  onSystemStateChange((prev) => ({
+    ...prev,
+    surfaces: normalizedSurfaces.length ? normalizedSurfaces : prev.surfaces,
+    entrancePupilDiameter,
+    wavelengths: wavelengths ?? prev.wavelengths,
+    fieldAngles: fieldAngles ?? prev.fieldAngles,
+    numRays: Number(stack.numRays ?? prev.numRays) || 9,
+    totalLength: Number(props.totalLength ?? prev.totalLength) || 0,
+    fNumber: Number(props.fNumber ?? prev.fNumber) || 0,
+    rmsSpotRadius: Number(props.rmsSpotRadius ?? prev.rmsSpotRadius) || 0,
+    traceResult: null,
+    traceError: null,
+  }))
+}
+
+export function SystemEditor({ systemState, onSystemStateChange, onLoadComplete }: SystemEditorProps) {
   const surfaces = systemState.surfaces
   const [customMaterialIds, setCustomMaterialIds] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2500)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const handleLoadDesign = async () => {
+    if ('showOpenFilePicker' in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }],
+          multiple: false,
+        })
+        const file = await handle.getFile()
+        const text = await file.text()
+        const data = JSON.parse(text)
+        applyLoadedData(data, onSystemStateChange)
+        onLoadComplete?.(handle.name)
+        setToast('Success')
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setToast('Invalid file')
+      }
+      return
+    }
+    fileInputRef.current?.click()
+  }
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const text = reader.result as string
+        const data = JSON.parse(text)
+        applyLoadedData(data, onSystemStateChange)
+        onLoadComplete?.(file.name)
+        setToast('Success')
+      } catch {
+        setToast('Invalid file')
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   const updateSurface = (index: number, partial: Partial<Surface>) => {
     onSystemStateChange((prev) => ({
@@ -165,23 +346,63 @@ export function SystemEditor({ systemState, onSystemStateChange }: SystemEditorP
   ] as const
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative">
+      {toast && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-lg font-medium shadow-lg transition-opacity ${
+            toast === 'Success'
+              ? 'bg-emerald-500/90 text-white'
+              : 'bg-red-500/90 text-white'
+          }`}
+        >
+          {toast === 'Success' ? 'Design loaded successfully' : 'Invalid file'}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-cyan-electric font-semibold text-lg">
           Optical Stack
         </h2>
-        <button
-          onClick={addSurface}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all"
-          style={{
-            background: 'linear-gradient(135deg, #22D3EE 0%, #0891b2 100%)',
-            color: '#0B1120',
-            boxShadow: '0 0 24px rgba(34, 211, 238, 0.3)',
-          }}
-        >
-          <Plus className="w-5 h-5" strokeWidth={2} />
-          New Surface
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <button
+            onClick={handleLoadDesign}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all border border-cyan-electric/50 text-cyan-electric hover:bg-cyan-electric/10"
+          >
+            <Upload className="w-5 h-5" strokeWidth={2} />
+            Load Design
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await saveDesign(systemState)
+              } catch {
+                setToast('Save failed')
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all border border-cyan-electric/50 text-cyan-electric hover:bg-cyan-electric/10"
+          >
+            <Download className="w-5 h-5" strokeWidth={2} />
+            Save Design
+          </button>
+          <button
+            onClick={addSurface}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #22D3EE 0%, #0891b2 100%)',
+              color: '#0B1120',
+              boxShadow: '0 0 24px rgba(34, 211, 238, 0.3)',
+            }}
+          >
+            <Plus className="w-5 h-5" strokeWidth={2} />
+            New Surface
+          </button>
+        </div>
       </div>
 
       <div className="glass-card overflow-hidden flex-1 min-h-0">

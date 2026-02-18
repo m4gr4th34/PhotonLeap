@@ -12,16 +12,22 @@ const navItems: { id: NavTab; label: string; icon: typeof Circle }[] = [
 type NavBarProps = {
   activeTab: NavTab
   onTabChange: (tab: NavTab) => void
+  loadedFileName?: string | null
 }
 
-export function NavBar({ activeTab, onTabChange }: NavBarProps) {
+export function NavBar({ activeTab, onTabChange, loadedFileName }: NavBarProps) {
   return (
     <div className="glass-card border-b border-white/10 rounded-none">
       <nav className="flex items-center gap-1 px-6 py-3">
-        <div className="flex items-center gap-2 mr-8">
+        <div className="flex items-center gap-4 mr-8">
           <span className="text-cyan-electric font-semibold text-lg">
             Lens Designer
           </span>
+          {loadedFileName && (
+            <span className="text-slate-400 text-sm font-medium">
+              File: {loadedFileName}
+            </span>
+          )}
         </div>
         {navItems.map((item) => {
           const Icon = item.icon
