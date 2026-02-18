@@ -9,12 +9,22 @@ export type Surface = {
   description: string
 }
 
+export type MetricsAtZ = {
+  z: number
+  rmsRadius: number | null
+  beamWidth: number | null
+  chiefRayAngle: number | null
+  yCentroid: number | null
+  numRays: number
+}
+
 export type TraceResult = {
   rays: number[][][]
   surfaces: number[][][]
   focusZ: number
   zOrigin?: number
   performance?: { rmsSpotRadius: number; totalLength: number; fNumber: number }
+  metricsSweep?: MetricsAtZ[]
 }
 
 import { config } from '../config'

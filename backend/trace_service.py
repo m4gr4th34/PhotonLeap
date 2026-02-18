@@ -106,6 +106,114 @@ def _ray_to_polyline(ray, tfrms, extend_parallel_back=50.0, extend_to_focus=True
     return [[float(p[0]), float(p[1])] for p in pts]
 
 
+def _interpolate_ray_at_z(ray, z_pos):
+    """
+    Interpolate (y, slope) of a ray at a specific Z position.
+    Ray format: list of [z, y] points. Returns (y, slope) or (None, None) if ray is empty.
+    """
+    if not ray or len(ray) < 2:
+        return None, None
+    pts = np.array(ray)
+    z_vals = pts[:, 0]
+    y_vals = pts[:, 1]
+    z_min, z_max = float(z_vals.min()), float(z_vals.max())
+    if z_pos <= z_min:
+        dz = z_vals[1] - z_vals[0]
+        dy = y_vals[1] - y_vals[0]
+        slope = dy / dz if abs(dz) > 1e-12 else 0.0
+        y = y_vals[0] + slope * (z_pos - z_vals[0])
+        return float(y), float(slope)
+    if z_pos >= z_max:
+        dz = z_vals[-1] - z_vals[-2]
+        dy = y_vals[-1] - y_vals[-2]
+        slope = dy / dz if abs(dz) > 1e-12 else 0.0
+        y = y_vals[-1] + slope * (z_pos - z_vals[-1])
+        return float(y), float(slope)
+    for i in range(len(pts) - 1):
+        z0, z1 = z_vals[i], z_vals[i + 1]
+        if z0 <= z_pos <= z1:
+            dz = z1 - z0
+            dy = y_vals[i + 1] - y_vals[i]
+            slope = dy / dz if abs(dz) > 1e-12 else 0.0
+            t = (z_pos - z0) / dz if abs(dz) > 1e-12 else 0.0
+            y = y_vals[i] + t * dy
+            return float(y), float(slope)
+    return None, None
+
+
+def get_metrics_at_z(z_pos, ray_data):
+    """
+    Compute optical metrics at an arbitrary Z position by interpolating ray data.
+
+    Args:
+        z_pos: Z position (mm) at which to evaluate metrics
+        ray_data: List of rays, each ray is [[z,y], [z,y], ...]
+
+    Returns:
+        dict with rmsRadius (mm), beamWidth (mm), chiefRayAngle (degrees),
+        yCentroid (mm), numRays (int). Values are None if no valid rays.
+    """
+    interpolated = []
+    for ray in ray_data:
+        y, slope = _interpolate_ray_at_z(ray, z_pos)
+        if y is not None:
+            interpolated.append((y, slope))
+
+    if not interpolated:
+        return {
+            "rmsRadius": None,
+            "beamWidth": None,
+            "chiefRayAngle": None,
+            "yCentroid": None,
+            "numRays": 0,
+        }
+
+    y_vals = np.array([p[0] for p in interpolated])
+    n = len(y_vals)
+    y_centroid = float(np.mean(y_vals))
+
+    # RMS Radius: sqrt(1/N * sum((y_i - y_centroid)^2))
+    rms_radius = float(np.sqrt(np.mean((y_vals - y_centroid) ** 2)))
+
+    # Beam Width: max Y - min Y
+    beam_width = float(np.max(y_vals) - np.min(y_vals))
+
+    # Chief ray: the one starting at (0,0) in pupil = smallest |y| at first point
+    chief_idx = min(range(len(ray_data)), key=lambda i: abs(ray_data[i][0][1]) if ray_data[i] else float("inf"))
+    _, chief_slope = _interpolate_ray_at_z(ray_data[chief_idx], z_pos)
+    chief_ray_angle = np.degrees(np.arctan(chief_slope)) if chief_slope is not None else None
+
+    return {
+        "rmsRadius": rms_radius,
+        "beamWidth": beam_width,
+        "chiefRayAngle": float(chief_ray_angle) if chief_ray_angle is not None else None,
+        "yCentroid": y_centroid,
+        "numRays": n,
+    }
+
+
+def _precompute_metrics_sweep(rays, num_points=100):
+    """
+    Pre-compute metrics at num_points Z positions for instant frontend scrubbing.
+    Returns list of {z, rmsRadius, beamWidth, chiefRayAngle, yCentroid, numRays}.
+    """
+    if not rays:
+        return []
+    all_z = []
+    for ray in rays:
+        for pt in ray:
+            all_z.append(pt[0])
+    z_min = min(all_z)
+    z_max = max(all_z)
+    if z_max <= z_min:
+        z_max = z_min + 1.0
+    z_positions = np.linspace(z_min, z_max, num_points)
+    return [
+        {"z": float(z), **get_metrics_at_z(z, rays)}
+        for z in z_positions
+    ]
+
+
 def optical_stack_to_surf_data(surfaces):
     """
     Convert frontend surfaces to rayoptics surf_data_list [curvature, thickness, n, v].
@@ -136,7 +244,7 @@ def run_trace(optical_stack: dict) -> dict:
 
     surfaces = optical_stack.get("surfaces", [])
     if not surfaces:
-        return {"error": "No surfaces provided", "rays": [], "surfaces": [], "focusZ": 0}
+        return {"error": "No surfaces provided", "rays": [], "surfaces": [], "focusZ": 0, "metricsSweep": []}
 
     epd = float(optical_stack.get("entrancePupilDiameter", 10) or 10)
     wvl_nm = float(optical_stack.get("wavelengths", [587.6])[0] or 587.6)
@@ -156,7 +264,7 @@ def run_trace(optical_stack: dict) -> dict:
             surface_diameters=surface_diameters,
         )
     except Exception as e:
-        return {"error": str(e), "rays": [], "surfaces": [], "focusZ": 0}
+        return {"error": str(e), "rays": [], "surfaces": [], "focusZ": 0, "metricsSweep": []}
 
     sm = opt_model.seq_model
     tfrms = sm.gbl_tfrms
@@ -227,6 +335,8 @@ def run_trace(optical_stack: dict) -> dict:
     total_length = float(sum(s[1] for s in surf_data_list))
     f_number = float(fod.fno) if fod and fod.efl != 0 else 0.0
 
+    metrics_sweep = _precompute_metrics_sweep(rays, num_points=100)
+
     return {
         "rays": rays,
         "surfaces": surface_curves,
@@ -237,4 +347,5 @@ def run_trace(optical_stack: dict) -> dict:
             "totalLength": total_length,
             "fNumber": f_number,
         },
+        "metricsSweep": metrics_sweep,
     }

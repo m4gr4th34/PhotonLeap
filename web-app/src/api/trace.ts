@@ -17,6 +17,14 @@ export type TraceResponse = {
     totalLength: number
     fNumber: number
   }
+  metricsSweep?: Array<{
+    z: number
+    rmsRadius: number | null
+    beamWidth: number | null
+    chiefRayAngle: number | null
+    yCentroid: number | null
+    numRays: number
+  }>
   error?: string
 }
 

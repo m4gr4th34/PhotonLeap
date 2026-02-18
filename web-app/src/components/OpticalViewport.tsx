@@ -1,8 +1,8 @@
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Play, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
-import type { SystemState, TraceResult } from '../types/system'
+import type { SystemState, TraceResult, MetricsAtZ } from '../types/system'
 import { traceOpticalStack } from '../api/trace'
 import { config } from '../config'
 
@@ -145,6 +145,28 @@ function computeOpticalBounds(
   return { zRange: zMax - zMin, yExtent }
 }
 
+/** Interpolate metrics at arbitrary Z from precomputed sweep. */
+function interpolateMetricsAtZ(sweep: MetricsAtZ[] | undefined, z: number): MetricsAtZ | null {
+  if (!sweep?.length) return null
+  if (z <= sweep[0].z) return sweep[0]
+  if (z >= sweep[sweep.length - 1].z) return sweep[sweep.length - 1]
+  let i = 0
+  while (i < sweep.length - 1 && sweep[i + 1].z < z) i++
+  const a = sweep[i]
+  const b = sweep[i + 1]
+  const t = (z - a.z) / (b.z - a.z)
+  const lerp = (x: number | null, y: number | null) =>
+    x != null && y != null ? x + t * (y - x) : x ?? y ?? null
+  return {
+    z,
+    rmsRadius: lerp(a.rmsRadius, b.rmsRadius),
+    beamWidth: lerp(a.beamWidth, b.beamWidth),
+    chiefRayAngle: lerp(a.chiefRayAngle, b.chiefRayAngle),
+    yCentroid: lerp(a.yCentroid, b.yCentroid),
+    numRays: a.numRays,
+  }
+}
+
 type OpticalViewportProps = {
   className?: string
   systemState: SystemState
@@ -220,6 +242,7 @@ export function OpticalViewport({
             focusZ: res.focusZ ?? 0,
             zOrigin: res.zOrigin,
             performance: res.performance,
+            metricsSweep: res.metricsSweep ?? [],
           },
           traceError: null,
         }))
@@ -351,6 +374,45 @@ export function OpticalViewport({
     [traceResult, surfaces, epd]
   )
 
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [scanHud, setScanHud] = useState<{
+    isHovering: boolean
+    mouseX: number
+    mouseY: number
+    cursorSvgX: number
+    cursorZ: number
+  }>({ isHovering: false, mouseX: 0, mouseY: 0, cursorSvgX: 0, cursorZ: 0 })
+
+  const handleSvgMouseMove = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const svg = svgRef.current
+      if (!svg) return
+      const pt = svg.createSVGPoint()
+      pt.x = e.clientX
+      pt.y = e.clientY
+      const ctm = svg.getScreenCTM()
+      if (!ctm) return
+      const svgPt = pt.matrixTransform(ctm.inverse())
+      const z = (svgPt.x - xOffset) / scale
+      setScanHud({
+        isHovering: true,
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        cursorSvgX: svgPt.x,
+        cursorZ: z,
+      })
+    },
+    [scale, xOffset]
+  )
+
+  const handleSvgMouseLeave = useCallback(() => {
+    setScanHud((prev) => ({ ...prev, isHovering: false }))
+  }, [])
+
+  const scanMetrics = scanHud.isHovering
+    ? interpolateMetricsAtZ(traceResult?.metricsSweep ?? [], scanHud.cursorZ)
+    : null
+
   return (
     <div className={`relative ${className}`}>
       <div className="absolute top-4 left-4 z-10 flex items-center gap-4 glass-card px-4 py-2 rounded-lg">
@@ -457,9 +519,13 @@ export function OpticalViewport({
             contentStyle={{ width: '100%', height: '100%', minHeight: '320px' }}
           >
             <svg
+              ref={svgRef}
               viewBox={`0 0 ${viewWidth} ${viewHeight}`}
               className="w-full h-full min-h-[320px] block"
               preserveAspectRatio="xMidYMid meet"
+              onMouseEnter={handleSvgMouseMove}
+              onMouseMove={handleSvgMouseMove}
+              onMouseLeave={handleSvgMouseLeave}
             >
               <defs>
                 <pattern
@@ -600,6 +666,20 @@ export function OpticalViewport({
               filter="url(#glow-strong)"
             />
           )}
+
+          {scanHud.isHovering && (
+            <line
+              x1={scanHud.cursorSvgX}
+              y1={0}
+              x2={scanHud.cursorSvgX}
+              y2={viewHeight}
+              stroke="#22D3EE"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+              strokeOpacity="0.8"
+              pointerEvents="none"
+            />
+          )}
         </svg>
           </TransformComponent>
 
@@ -638,6 +718,52 @@ export function OpticalViewport({
               Reset View
             </motion.button>
           </motion.div>
+
+          {scanHud.isHovering && (
+            <motion.div
+              className="pointer-events-none fixed z-50 rounded-lg px-3 py-2 backdrop-blur-[12px] bg-slate-900/70 border border-cyan-electric/50"
+              style={{
+                fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
+              }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{
+                left: scanHud.mouseX + 16,
+                top: scanHud.mouseY + 16,
+                opacity: 1,
+                scale: 1,
+              }}
+              transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                <span className="text-slate-400">Z:</span>
+                <span className="text-cyan-electric tabular-nums">
+                  {scanMetrics ? scanMetrics.z.toFixed(2) : scanHud.cursorZ.toFixed(2)} mm
+                </span>
+                <span className="text-slate-400">RMS:</span>
+                <span className="text-cyan-electric tabular-nums">
+                  {scanMetrics?.rmsRadius != null
+                    ? (scanMetrics.rmsRadius * 1000).toFixed(2)
+                    : '—'}
+                  {' µm'}
+                </span>
+                <span className="text-slate-400">Width:</span>
+                <span className="text-cyan-electric tabular-nums">
+                  {scanMetrics?.beamWidth != null
+                    ? scanMetrics.beamWidth.toFixed(3)
+                    : '—'}
+                  {' mm'}
+                </span>
+                <span className="text-slate-400">CRA:</span>
+                <span className="text-cyan-electric tabular-nums">
+                  {scanMetrics?.chiefRayAngle != null
+                    ? scanMetrics.chiefRayAngle.toFixed(2)
+                    : '—'}
+                  {'°'}
+                </span>
+              </div>
+            </motion.div>
+          )}
             </>
             )
           }}

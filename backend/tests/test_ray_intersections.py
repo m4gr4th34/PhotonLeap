@@ -4,7 +4,7 @@ import pytest
 
 # Skip if trace_service cannot be imported (rayoptics dependency)
 try:
-    from backend.trace_service import run_trace
+    from backend.trace_service import run_trace, get_metrics_at_z
     TRACE_AVAILABLE = True
 except ImportError:
     TRACE_AVAILABLE = False
@@ -127,3 +127,66 @@ class TestThreeSurfaceRayIntersections:
         assert "focusZ" in result
         assert isinstance(result["focusZ"], (int, float))
         assert result["focusZ"] > 0
+
+    def test_metrics_sweep_returned(self, three_surface_optical_stack):
+        """Result should include metricsSweep with 100 precomputed points."""
+        result = run_trace(three_surface_optical_stack)
+        assert "metricsSweep" in result
+        sweep = result["metricsSweep"]
+        assert isinstance(sweep, list)
+        assert len(sweep) == 100
+        for pt in sweep:
+            assert "z" in pt
+            assert "rmsRadius" in pt
+            assert "beamWidth" in pt
+            assert "chiefRayAngle" in pt
+            assert "yCentroid" in pt
+            assert "numRays" in pt
+
+
+class TestGetMetricsAtZ:
+    """Tests for get_metrics_at_z interpolation and metrics calculation."""
+
+    def test_rms_radius_formula(self):
+        """RMS = sqrt(1/N * sum((y_i - y_centroid)^2))."""
+        # Simple ray data: 3 rays at z=10 with y = -1, 0, 1 -> centroid=0, RMS=sqrt(2/3)
+        rays = [
+            [[0, -1], [20, -1]],
+            [[0, 0], [20, 0]],
+            [[0, 1], [20, 1]],
+        ]
+        m = get_metrics_at_z(10, rays)
+        assert m["rmsRadius"] is not None
+        expected_rms = (2 / 3) ** 0.5  # variance = 2/3, RMS = sqrt(2/3)
+        assert abs(m["rmsRadius"] - expected_rms) < 1e-6
+        assert m["yCentroid"] == 0.0
+
+    def test_beam_width(self):
+        """Beam width = max Y - min Y."""
+        rays = [
+            [[0, -2], [20, -2]],
+            [[0, 3], [20, 3]],
+        ]
+        m = get_metrics_at_z(10, rays)
+        assert m["beamWidth"] == 5.0
+
+    def test_chief_ray_angle(self):
+        """Chief ray (smallest |y| at start) angle in degrees."""
+        rays = [
+            [[0, -5], [10, -3]],   # slope = 0.2
+            [[0, 0], [10, 2]],     # chief ray, slope = 0.2
+            [[0, 5], [10, 7]],
+        ]
+        m = get_metrics_at_z(5, rays)
+        assert m["chiefRayAngle"] is not None
+        import math
+        expected_deg = math.degrees(math.atan(0.2))
+        assert abs(m["chiefRayAngle"] - expected_deg) < 0.01
+
+    def test_empty_rays_returns_none(self):
+        """Empty ray data returns None metrics."""
+        m = get_metrics_at_z(10, [])
+        assert m["rmsRadius"] is None
+        assert m["beamWidth"] is None
+        assert m["chiefRayAngle"] is None
+        assert m["numRays"] == 0
