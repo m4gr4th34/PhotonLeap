@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react'
 import { FileDown, Printer } from 'lucide-react'
 import type { SystemState } from '../types/system'
 import { generateIso10110Svg } from '../lib/iso10110_blueprint'
-import { toLensX } from '../lib/lensX'
+import { toLensX, type CustomCoatingData } from '../lib/lensX'
+import { fetchCoatingDefinition } from '../api/coatings'
 
 type ExportDrawingProps = {
   systemState: SystemState
@@ -37,12 +38,29 @@ export function ExportDrawing({
     URL.revokeObjectURL(url)
   }, [systemState, projectName, date, drawnBy])
 
-  const handleExportLensX = useCallback(() => {
-    const lensX = toLensX(systemState.surfaces, {
+  const handleExportLensX = useCallback(async () => {
+    const surfaces = systemState.surfaces
+    const customCoatingData: CustomCoatingData = {}
+    const names = [...new Set(surfaces.map((s) => s.coating).filter(Boolean) as string[])]
+    for (const name of names) {
+      const s = surfaces.find((surf) => surf.coating === name)
+      if (s?.coatingDataPoints != null || s?.coatingConstantValue != null) continue
+      const def = await fetchCoatingDefinition(name)
+      if (def) {
+        customCoatingData[name] = {
+          data_type: def.data_type,
+          constant_value: def.constant_value,
+          data_points: def.data_points,
+          is_hr: def.is_hr,
+        }
+      }
+    }
+    const lensX = toLensX(surfaces, {
       projectName: projectName || 'Untitled',
       date,
       drawnBy,
       entrancePupilDiameter: systemState.entrancePupilDiameter ?? 10,
+      customCoatingData,
     })
     const blob = new Blob([JSON.stringify(lensX, null, 2)], {
       type: 'application/json;charset=utf-8',

@@ -45,6 +45,34 @@ def init_db() -> None:
     _get_conn().close()
 
 
+def get_coating_by_name(name: str) -> Optional[Dict[str, Any]]:
+    """Return a single user coating by name, or None if not found."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT id, name, category, data_type, constant_value, data_points, description, is_hr FROM user_coating WHERE name = ?",
+            (name.strip(),),
+        )
+        r = cur.fetchone()
+        if r is None:
+            return None
+        d: Dict[str, Any] = {
+            "id": r["id"],
+            "name": r["name"],
+            "category": r["category"],
+            "data_type": r["data_type"],
+            "description": r["description"] or "",
+            "is_hr": bool(r["is_hr"]),
+        }
+        if r["data_type"] == "constant":
+            d["constant_value"] = r["constant_value"] if r["constant_value"] is not None else 0.04
+        else:
+            d["data_points"] = json.loads(r["data_points"]) if r["data_points"] else []
+        return d
+    finally:
+        conn.close()
+
+
 def get_all_user_coatings() -> List[Dict[str, Any]]:
     """Return all user-defined coatings."""
     conn = _get_conn()

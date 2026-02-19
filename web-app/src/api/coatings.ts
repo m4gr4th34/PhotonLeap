@@ -93,6 +93,32 @@ export async function fetchCoatingsLibrary(): Promise<CoatingLibraryItem[]> {
   }
 }
 
+export type CoatingDefinition = {
+  name: string
+  data_type: 'constant' | 'table'
+  constant_value?: number
+  data_points?: ReflectivityPoint[]
+  is_hr?: boolean
+}
+
+/** Fetch full definition for a custom coating (for Lens-X export portability) */
+export async function fetchCoatingDefinition(coatingName: string): Promise<CoatingDefinition | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/coatings/${encodeURIComponent(coatingName)}/definition`)
+    if (!res.ok) return null
+    const data = await res.json()
+    return {
+      name: data.name ?? coatingName,
+      data_type: data.data_type ?? 'constant',
+      constant_value: data.constant_value,
+      data_points: data.data_points,
+      is_hr: data.is_hr ?? false,
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Save a new user-defined coating */
 export async function createCustomCoating(coating: CustomCoatingCreate): Promise<CoatingOption> {
   const res = await fetch(`${API_BASE}/api/coatings/custom`, {

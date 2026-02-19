@@ -25,6 +25,12 @@ export type Surface = {
   sellmeierCoefficients?: { B: number[]; C: number[] }
   /** Coating (e.g. MgF2, BBAR, V-Coat 532/1064, Protected Silver/Gold/Aluminum, HR) — affects power loss */
   coating?: string
+  /** Inline R(λ) table for custom coatings (from .lensx import) — used when coating not in local library */
+  coatingDataPoints?: { wavelength: number; reflectivity: number }[]
+  /** Inline constant R for custom coatings (from .lensx import) */
+  coatingConstantValue?: number
+  /** Whether inline custom coating is HR (reflects) vs AR (transmits) */
+  coatingIsHr?: boolean
 }
 
 export type MetricsAtZ = {

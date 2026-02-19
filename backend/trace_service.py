@@ -479,7 +479,7 @@ def run_trace(optical_stack: dict) -> dict:
         surface_curves.append([[float(p[0]), float(p[1])] for p in gbl])
 
     # Power loss from coatings: R(λ) per surface, P_new = P_old × (1 - R)
-    from coating_engine import get_reflectivity, is_hr_coating
+    from coating_engine import get_reflectivity, is_hr_coating, reflectivity_from_surface, is_hr_from_surface
 
     # Ray polylines — trace each field separately for field-weighted focus
     grid_def = [np.array([-1.0, -1.0]), np.array([1.0, 1.0]), num_rays]
@@ -517,9 +517,13 @@ def run_trace(optical_stack: dict) -> dict:
                 for seg_idx in range(1, n_seg):
                     surf_idx = seg_idx - 1
                     if surf_idx < len(surfaces):
-                        coating = surfaces[surf_idx].get("coating") or ""
-                        r = get_reflectivity(coating, wvl_nm)
-                        if is_hr_coating(coating):
+                        surf = surfaces[surf_idx]
+                        coating = surf.get("coating") or ""
+                        r_inline = reflectivity_from_surface(surf, wvl_nm)
+                        r = r_inline if r_inline is not None else get_reflectivity(coating, wvl_nm)
+                        hr = is_hr_from_surface(surf)
+                        is_hr = hr if hr is not None else is_hr_coating(coating)
+                        if is_hr:
                             p *= r  # reflected ray carries R fraction
                         else:
                             p *= 1.0 - r  # transmitted ray

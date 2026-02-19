@@ -64,6 +64,9 @@ export async function traceOpticalStack(optical_stack: {
       material: s.material,
       description: s.description,
       coating: s.coating,
+      coating_r_table: s.coatingDataPoints ?? undefined,
+      coating_constant_r: s.coatingConstantValue ?? undefined,
+      coating_is_hr: s.coatingIsHr ?? undefined,
     })),
   }
   const res = await fetch(`${API_BASE}/api/trace`, {
@@ -117,6 +120,9 @@ export async function runMonteCarlo(optical_stack: {
       decenterX: s.decenterX ?? 0,
       decenterY: s.decenterY ?? 0,
       coating: s.coating,
+      coating_r_table: s.coatingDataPoints ?? undefined,
+      coating_constant_r: s.coatingConstantValue ?? undefined,
+      coating_is_hr: s.coatingIsHr ?? undefined,
     })),
   }
   const res = await fetch(`${API_BASE}/api/monte-carlo`, {

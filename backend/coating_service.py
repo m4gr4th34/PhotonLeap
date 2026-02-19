@@ -177,7 +177,7 @@ _BUILTIN_COATINGS: List[Dict[str, Any]] = [
 ]
 
 
-def _interpolate_table(data_points: List[Dict[str, float]], lambda_nm: float) -> float:
+def _interpolate_table(data_points: List[Dict[str, Any]], lambda_nm: float) -> float:
     """Interpolate R(λ) from wavelength/reflectivity table."""
     if not data_points:
         return 0.04

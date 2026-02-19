@@ -38,6 +38,12 @@ export interface LensXSurface {
     sellmeier?: { B: number[]; C: number[] }
     refractive_index?: number
     coating?: string
+    /** Inline R(λ) table for custom coatings — full portability when recipient lacks local library */
+    coating_r_table?: { wavelength: number; reflectivity: number }[]
+    /** Inline constant R for custom coatings */
+    coating_constant_r?: number
+    /** Whether custom coating is HR (reflects) vs AR (transmits) */
+    coating_is_hr?: boolean
   }
   manufacturing?: {
     surface_quality?: string
@@ -81,6 +87,11 @@ export interface LensXDocument {
  * Full state serialization: always emits tolerances and system_settings with explicit values
  * (0 for omitted) so the Monte Carlo engine has a complete structure on reload.
  */
+export type CustomCoatingData = Record<
+  string,
+  { data_type: 'constant' | 'table'; constant_value?: number; data_points?: { wavelength: number; reflectivity: number }[]; is_hr?: boolean }
+>
+
 export function toLensX(
   surfaces: Surface[],
   options: {
@@ -94,6 +105,8 @@ export function toLensX(
     targetYield?: number
     width?: number
     height?: number
+    /** Custom coating definitions for surfaces using custom coatings — embeds R(λ) for portability */
+    customCoatingData?: CustomCoatingData
   } = {}
 ): LensXDocument {
   const {
@@ -107,6 +120,7 @@ export function toLensX(
     targetYield = 0.95,
     width = 800,
     height = 570,
+    customCoatingData = {},
   } = options
 
   const lensSurfaces: LensXSurface[] = surfaces.map((s) => {
@@ -114,6 +128,18 @@ export function toLensX(
     if (s.refractiveIndex != null) physics.refractive_index = s.refractiveIndex
     if (s.sellmeierCoefficients) physics.sellmeier = s.sellmeierCoefficients
     if (s.coating) physics.coating = s.coating
+    // Inline coating data: prefer surface's embedded data (from import), else customCoatingData
+    const def = s.coatingDataPoints != null || s.coatingConstantValue != null
+      ? { data_type: (s.coatingDataPoints != null ? 'table' : 'constant') as const, data_points: s.coatingDataPoints, constant_value: s.coatingConstantValue, is_hr: s.coatingIsHr }
+      : s.coating ? customCoatingData[s.coating] : undefined
+    if (def) {
+      if (def.data_type === 'table' && def.data_points?.length) {
+        physics.coating_r_table = def.data_points
+      } else if (def.data_type === 'constant' && def.constant_value != null) {
+        physics.coating_constant_r = def.constant_value
+      }
+      if (def.is_hr != null) physics.coating_is_hr = def.is_hr
+    }
     const r = s.radius ?? 0
     const isFlat = r === 0 || (typeof r === 'number' && Math.abs(r) < 0.01)
     const tilt = s.tiltTolerance ?? 0
@@ -264,6 +290,18 @@ export function fromLensX(doc: unknown): FromLensXResult {
     }
     if (physics.coating && typeof physics.coating === 'string') {
       surf.coating = physics.coating.trim()
+    }
+    if (Array.isArray(physics.coating_r_table) && physics.coating_r_table.length > 0) {
+      surf.coatingDataPoints = physics.coating_r_table.map((p: { wavelength?: number; reflectivity?: number }) => ({
+        wavelength: Number(p?.wavelength) || 0,
+        reflectivity: Number(p?.reflectivity) ?? 0,
+      }))
+    }
+    if (typeof physics.coating_constant_r === 'number') {
+      surf.coatingConstantValue = physics.coating_constant_r
+    }
+    if (typeof physics.coating_is_hr === 'boolean') {
+      surf.coatingIsHr = physics.coating_is_hr
     }
     if (mfg.surface_quality) surf.surfaceQuality = String(mfg.surface_quality)
     if (typeof mfg.radius_tolerance === 'number') surf.radiusTolerance = mfg.radius_tolerance

@@ -35,7 +35,7 @@ app.add_middleware(
 
 
 class SurfaceSchema(BaseModel):
-    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances, coating, sellmeierCoefficients, surfaceQuality)."""
+    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances, coating, sellmeierCoefficients, surfaceQuality). Inline coating data for portability: coating_r_table, coating_constant_r, coating_is_hr."""
     id: str
     type: str
     radius: float
@@ -50,6 +50,9 @@ class SurfaceSchema(BaseModel):
     coating: Optional[str] = None
     sellmeierCoefficients: Optional[Dict[str, Any]] = None
     surfaceQuality: Optional[str] = None
+    coating_r_table: Optional[List[Dict[str, float]]] = None
+    coating_constant_r: Optional[float] = None
+    coating_is_hr: Optional[bool] = None
 
 
 class CoatingItem(BaseModel):
@@ -181,6 +184,26 @@ def get_coating_reflectivity(
         points.append({"wavelength": round(w, 1), "reflectivity": round(r, 6)})
         w += step_nm
     return {"coating": coating_name, "points": points}
+
+
+@app.get("/api/coatings/{coating_name}/definition")
+def get_coating_definition(coating_name: str):
+    """
+    Return full definition for a custom coating (data_type, constant_value, data_points, is_hr).
+    Used by Lens-X export to embed custom R(λ) tables for portability.
+    Returns 404 if coating is built-in or not found.
+    """
+    from coating_db import get_coating_by_name
+    definition = get_coating_by_name(coating_name)
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Custom coating '{coating_name}' not found")
+    return {
+        "name": definition["name"],
+        "data_type": definition["data_type"],
+        "constant_value": definition.get("constant_value"),
+        "data_points": definition.get("data_points"),
+        "is_hr": definition.get("is_hr", False),
+    }
 
 
 class GlassMaterial(BaseModel):

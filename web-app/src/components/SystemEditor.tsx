@@ -6,10 +6,10 @@ import { ChevronDown, GripVertical, Plus, Trash2, Search, FileUp, Save, FolderOp
 import type { SystemState, Surface } from '../types/system'
 import { config } from '../config'
 import { fetchMaterials, nFromCoeffs, type MaterialOption } from '../api/materials'
-import { fetchCoatings, COATINGS_FALLBACK, fetchReflectivityCurve, getCoatingSwatchStyle, type CoatingOption, type ReflectivityPoint } from '../api/coatings'
+import { fetchCoatings, COATINGS_FALLBACK, fetchReflectivityCurve, getCoatingSwatchStyle, fetchCoatingDefinition, type CoatingOption, type ReflectivityPoint } from '../api/coatings'
 import { ReflectivityCurveGraph } from './ReflectivityCurveGraph'
 import { importLensSystem } from '../api/importLens'
-import { toLensX, parseLensXFile } from '../lib/lensX'
+import { toLensX, parseLensXFile, type CustomCoatingData } from '../lib/lensX'
 
 /** Fallback when API is unavailable */
 const GLASS_LIBRARY_FALLBACK: MaterialOption[] = [
@@ -638,8 +638,23 @@ export function SystemEditor({
     setLoadConfirmPending(null)
   }
 
-  const handleSaveProject = () => {
+  const handleSaveProject = async () => {
     const dateStr = new Date().toISOString().slice(0, 10)
+    const customCoatingData: CustomCoatingData = {}
+    const names = [...new Set(surfaces.map((s) => s.coating).filter(Boolean) as string[])]
+    for (const name of names) {
+      const s = surfaces.find((surf) => surf.coating === name)
+      if (s?.coatingDataPoints != null || s?.coatingConstantValue != null) continue
+      const def = await fetchCoatingDefinition(name)
+      if (def) {
+        customCoatingData[name] = {
+          data_type: def.data_type,
+          constant_value: def.constant_value,
+          data_points: def.data_points,
+          is_hr: def.is_hr,
+        }
+      }
+    }
     const doc = toLensX(surfaces, {
       projectName: systemState.projectName ?? 'Untitled',
       date: dateStr,
@@ -649,6 +664,7 @@ export function SystemEditor({
       mcIterations: systemState.mc_iterations ?? 1000,
       mcSeed: systemState.mc_seed ?? 42,
       targetYield: systemState.target_yield ?? 0.95,
+      customCoatingData,
     })
     const blob = new Blob([JSON.stringify(doc, null, 2)], {
       type: 'application/json',
