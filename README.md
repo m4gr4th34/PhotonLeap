@@ -58,6 +58,29 @@ Export your design as Lens-X JSON to share a complete, executable specification.
 
 ---
 
+## 🌈 Coating Lab & Spectral Analysis
+
+The **Coating Lab** is a professional-grade suite for managing thin-film performance.
+
+**Features**
+
+- **Pre-populated catalog** — 50+ coatings across AR, HR, metallic mirrors, beamsplitters, and dichroics (V-Coat, BBAR, Protected Silver/Gold/Aluminum, notch filters)
+- **Custom wizard** — Define user coatings from CSV spectral data; constant R or wavelength-dependent R(λ) tables
+- **Live graphing** — R(λ) curves visualized in the coating dropdown; reflectivity at primary wavelength
+- **Ray-trace integration** — Power loss per surface: I_new = I_old × (1 − R); HR coatings follow reflected ray
+- **Full portability** — Custom R(λ) tables embedded in Lens-X export; projects work on any machine without local coating library
+
+| Capability | Standard (Catalog) | Custom (Wizard) |
+|------------|-------------------|-----------------|
+| **Source** | Built-in library | CSV upload, constant R |
+| **R(λ)** | Analytic formulas | Table interpolation |
+| **Lens-X export** | Coating name only | Full R(λ) table serialized |
+| **Use case** | Quick design, common coatings | Measured data, proprietary specs |
+
+**Engineering impact** — The Coating Lab allows designers to move beyond geometric optics and account for energy loss and spectral filtering, essential for high-power laser and multi-spectral sensor design.
+
+---
+
 ## Installation
 
 **Backend (FastAPI / Python)**
