@@ -109,6 +109,12 @@ def monte_carlo(req: OpticalStackRequest):
     return run_monte_carlo(optical_stack, iterations=iterations)
 
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
+@app.get("/api/materials/n")
+def get_refractive_index(material: str, wavelength_nm: float):
+    """
+    Refractive index n at wavelength (nm) for verification.
+    Example: ?material=N-BK7&wavelength_nm=587 → n≈1.517
+    """
+    from glass_materials import refractive_index_at_wavelength
+    n = refractive_index_at_wavelength(wavelength_nm, material, 1.5)
+    return {"material": material, "wavelength_nm": wavelength_nm, "n": round(n, 6)}

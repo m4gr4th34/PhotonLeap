@@ -13,15 +13,18 @@ export type GlassMaterial = {
 
 const API_BASE = config.apiBaseUrl
 
-/** Compute n at 587.6 nm from Sellmeier coefficients (λ in µm). */
-function nFromCoeffs(lambdaNm: number, coeffs: Record<string, unknown>): number {
+/**
+ * Refractive index from Sellmeier equation.
+ * n²(λ) = 1 + B₁λ²/(λ²-C₁) + B₂λ²/(λ²-C₂) + B₃λ²/(λ²-C₃), λ in µm.
+ */
+export function nFromCoeffs(lambdaNm: number, coeffs: Record<string, unknown>): number {
   const B = coeffs.B as number[] | undefined
   const C = coeffs.C as number[] | undefined
   if (!B || !C || B.length < 3 || C.length < 3) {
     const n = coeffs.n as number | undefined
     return typeof n === 'number' ? n : 1.5
   }
-  const lam = lambdaNm * 1e-3
+  const lam = lambdaNm * 1e-3 // convert nm → µm
   const lam2 = lam * lam
   let n2 = 1
   for (let i = 0; i < 3; i++) {
@@ -30,7 +33,7 @@ function nFromCoeffs(lambdaNm: number, coeffs: Record<string, unknown>): number 
   return Math.sqrt(Math.max(n2, 1))
 }
 
-export type MaterialOption = { name: string; n: number }
+export type MaterialOption = { name: string; n: number; coefficients?: Record<string, unknown> }
 
 /** Fetch materials from backend; returns { name, n } for dropdown. Falls back to default list on error. */
 export async function fetchMaterials(): Promise<MaterialOption[]> {
@@ -49,6 +52,7 @@ export async function fetchMaterials(): Promise<MaterialOption[]> {
     return data.map((m) => ({
       name: m.name,
       n: nFromCoeffs(wvl, m.coefficients || {}),
+      coefficients: m.coefficients,
     }))
   } catch {
     return DEFAULT

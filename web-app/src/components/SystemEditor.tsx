@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { ChevronDown, GripVertical, Plus, Trash2, Search } from 'lucide-react'
 import type { SystemState, Surface } from '../types/system'
 import { config } from '../config'
-import { fetchMaterials, type MaterialOption } from '../api/materials'
+import { fetchMaterials, nFromCoeffs, type MaterialOption } from '../api/materials'
 
 /** Fallback when API is unavailable */
 const GLASS_LIBRARY_FALLBACK: MaterialOption[] = [
@@ -46,11 +46,15 @@ function MaterialCombobox({
   onChange,
   onClick,
   materials,
+  wavelengthNm,
+  fallbackN,
 }: {
   value: string
   onChange: (material: string, n?: number) => void
   onClick?: (e: React.MouseEvent) => void
   materials: MaterialOption[]
+  wavelengthNm: number
+  fallbackN: number
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -77,6 +81,12 @@ function MaterialCombobox({
 
   const commonFiltered = filtered.filter((m) => COMMON_MATERIALS.includes(m.name))
   const restFiltered = filtered.filter((m) => !COMMON_MATERIALS.includes(m.name))
+
+  const mat = materials.find((m) => m.name.toLowerCase() === value.toLowerCase())
+  const displayN =
+    mat?.coefficients
+      ? nFromCoeffs(wavelengthNm, mat.coefficients)
+      : fallbackN
 
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -203,10 +213,11 @@ function MaterialCombobox({
     )
 
   return (
-    <div className="flex gap-0.5">
-      <div className="relative flex-1">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-        <input
+    <div className="flex items-center gap-2">
+      <div className="flex gap-0.5 flex-1 min-w-0">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input
           ref={inputRef}
           type="text"
           value={isOpen ? query : value}
@@ -222,8 +233,8 @@ function MaterialCombobox({
           placeholder="Material..."
           className={`${inputClass} pl-8`}
         />
-      </div>
-      <button
+        </div>
+        <button
         type="button"
         onClick={(e) => {
           e.stopPropagation()
@@ -239,6 +250,13 @@ function MaterialCombobox({
       >
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
       </button>
+      </div>
+      <span
+        className="shrink-0 text-xs font-mono tabular-nums text-slate-500 min-w-[3.5rem]"
+        title={`n at ${(wavelengthNm / 1000).toFixed(3)} µm`}
+      >
+        n≈{displayN.toFixed(3)}
+      </span>
       {dropdownContent}
     </div>
   )
@@ -497,6 +515,8 @@ export function SystemEditor({
                   <MaterialCombobox
                     value={s.material}
                     materials={glassMaterials}
+                    wavelengthNm={systemState.wavelengths[0] ?? 587.6}
+                    fallbackN={s.refractiveIndex}
                     onChange={(material, n) =>
                       updateSurface(s.id, {
                         material,
