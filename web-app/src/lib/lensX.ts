@@ -7,8 +7,12 @@
  */
 
 import type { Surface } from '../types/system'
+import { config } from '../config'
 import { generateIso10110Svg } from './iso10110_blueprint'
 export { getISOString } from './iso10110'
+
+/** Valid LENS-X version strings */
+const VALID_LENS_X_VERSIONS = ['1.0']
 
 /** LENS-X surface with physics and manufacturing data */
 export interface LensXSurface {
@@ -43,6 +47,7 @@ export interface LensXDocument {
   optics: {
     surfaces: LensXSurface[]
     entrance_pupil_diameter?: number
+    reference_wavelength_nm?: number
   }
   geometry?: {
     svg_path: string
@@ -60,6 +65,7 @@ export function toLensX(
     date?: string
     drawnBy?: string
     entrancePupilDiameter?: number
+    referenceWavelengthNm?: number
     width?: number
     height?: number
   } = {}
@@ -69,6 +75,7 @@ export function toLensX(
     date = new Date().toISOString().slice(0, 10),
     drawnBy = 'MacOptics',
     entrancePupilDiameter = 10,
+    referenceWavelengthNm,
     width = 800,
     height = 570,
   } = options
@@ -97,11 +104,12 @@ export function toLensX(
     }
   })
 
+  const refWl = referenceWavelengthNm ?? 587.6
   const svgPreview = generateIso10110Svg(
     {
       surfaces,
       entrancePupilDiameter,
-      wavelengths: [587.6],
+      wavelengths: [refWl],
       fieldAngles: [0],
       numRays: 9,
       focusMode: 'On-Axis',
@@ -123,7 +131,124 @@ export function toLensX(
     optics: {
       surfaces: lensSurfaces,
       entrance_pupil_diameter: entrancePupilDiameter,
+      ...(referenceWavelengthNm != null && { reference_wavelength_nm: referenceWavelengthNm }),
     },
     geometry: { svg_path: svgPreview },
   }
+}
+
+/**
+ * Result of parsing a LENS-X file for load.
+ */
+export interface FromLensXResult {
+  surfaces: Surface[]
+  entrancePupilDiameter: number
+  wavelengths: number[]
+  projectName?: string
+}
+
+/**
+ * Parse and validate a LENS-X document. Throws if invalid.
+ * Converts LENS-X surfaces to internal Surface format.
+ */
+export function fromLensX(doc: unknown): FromLensXResult {
+  if (!doc || typeof doc !== 'object') {
+    throw new Error('Invalid LENS-X: expected an object')
+  }
+  const d = doc as Record<string, unknown>
+  const version = d.lens_x_version
+  if (typeof version !== 'string' || !VALID_LENS_X_VERSIONS.includes(version)) {
+    throw new Error(
+      `Invalid LENS-X: missing or unsupported lens_x_version. Expected one of: ${VALID_LENS_X_VERSIONS.join(', ')}`
+    )
+  }
+  const optics = d.optics
+  if (!optics || typeof optics !== 'object') {
+    throw new Error('Invalid LENS-X: missing optics block')
+  }
+  const opticsObj = optics as Record<string, unknown>
+  const surfacesRaw = opticsObj.surfaces
+  if (!Array.isArray(surfacesRaw)) {
+    throw new Error('Invalid LENS-X: optics.surfaces must be an array')
+  }
+  const surfaces: Surface[] = surfacesRaw.map((raw, idx) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`Invalid LENS-X: surface ${idx + 1} is not an object`)
+    }
+    const s = raw as Record<string, unknown>
+    const r = s.radius
+    const radius =
+      r === 'infinity' || r === 'inf' || r === 'flat' || r === 0
+        ? 0
+        : typeof r === 'number'
+          ? r
+          : 0
+    const thickness = typeof s.thickness === 'number' ? s.thickness : 0
+    const aperture = typeof s.aperture === 'number' ? s.aperture : 12.5
+    const diameter = Math.max(0.1, 2 * aperture)
+    const material = String(s.material || (s.type === 'Air' ? 'Air' : 'N-BK7')).trim()
+    const surfType = String(s.type || 'Glass').trim()
+    const isAir = surfType.toLowerCase() === 'air' || material.toLowerCase() === 'air'
+    const type = isAir ? 'Air' : 'Glass'
+    const physics = (s.physics || {}) as Record<string, unknown>
+    const n =
+      type === 'Air'
+        ? 1
+        : (typeof physics.refractive_index === 'number' ? physics.refractive_index : 1.52)
+    const mfg = (s.manufacturing || {}) as Record<string, unknown>
+    const surf: Surface = {
+      id: crypto.randomUUID(),
+      type,
+      radius,
+      thickness,
+      refractiveIndex: n,
+      diameter,
+      material: isAir ? 'Air' : material,
+      description: String(s.description || `Surface ${idx + 1}`),
+    }
+    if (physics.sellmeier && typeof physics.sellmeier === 'object') {
+      const sm = physics.sellmeier as { B?: number[]; C?: number[] }
+      if (Array.isArray(sm.B) && Array.isArray(sm.C)) {
+        surf.sellmeierCoefficients = { B: sm.B, C: sm.C }
+      }
+    }
+    if (physics.coating && typeof physics.coating === 'string') {
+      surf.coating = physics.coating.trim()
+    }
+    if (mfg.surface_quality) surf.surfaceQuality = String(mfg.surface_quality)
+    if (typeof mfg.radius_tolerance === 'number') surf.radiusTolerance = mfg.radius_tolerance
+    if (typeof mfg.thickness_tolerance === 'number') surf.thicknessTolerance = mfg.thickness_tolerance
+    if (typeof mfg.tilt_tolerance === 'number') surf.tiltTolerance = mfg.tilt_tolerance
+    return surf
+  })
+  const entrancePupilDiameter =
+    typeof opticsObj.entrance_pupil_diameter === 'number'
+      ? opticsObj.entrance_pupil_diameter
+      : config.defaults.entrancePupilDiameter
+  const refWl =
+    typeof opticsObj.reference_wavelength_nm === 'number'
+      ? opticsObj.reference_wavelength_nm
+      : config.defaults.defaultWavelength
+  const metadata = (d.metadata || {}) as Record<string, unknown>
+  const projectName =
+    typeof metadata.project_name === 'string' ? metadata.project_name : undefined
+  return {
+    surfaces,
+    entrancePupilDiameter,
+    wavelengths: [refWl],
+    projectName,
+  }
+}
+
+/**
+ * Parse a .lensx file (JSON text). Validates lens_x_version before returning.
+ */
+export function parseLensXFile(content: string): FromLensXResult {
+  let data: unknown
+  try {
+    data = JSON.parse(content)
+  } catch (e) {
+    throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  return fromLensX(data)
 }

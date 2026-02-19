@@ -2,13 +2,14 @@ import { useRef, useEffect, useLayoutEffect, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, GripVertical, Plus, Trash2, Search, FileUp, X } from 'lucide-react'
+import { ChevronDown, GripVertical, Plus, Trash2, Search, FileUp, Save, FolderOpen, X } from 'lucide-react'
 import type { SystemState, Surface } from '../types/system'
 import { config } from '../config'
 import { fetchMaterials, nFromCoeffs, type MaterialOption } from '../api/materials'
 import { fetchCoatings, COATINGS_FALLBACK, fetchReflectivityCurve, getCoatingSwatchStyle, type CoatingOption, type ReflectivityPoint } from '../api/coatings'
 import { ReflectivityCurveGraph } from './ReflectivityCurveGraph'
 import { importLensSystem } from '../api/importLens'
+import { toLensX, parseLensXFile } from '../lib/lensX'
 
 /** Fallback when API is unavailable */
 const GLASS_LIBRARY_FALLBACK: MaterialOption[] = [
@@ -556,7 +557,12 @@ export function SystemEditor({
     insertIndex: number
   } | null>(null)
   const [ignoredImportIds, setIgnoredImportIds] = useState<Set<string>>(new Set())
+  const [loadConfirmPending, setLoadConfirmPending] = useState<{
+    content: string
+    fileName: string
+  } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const loadFileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchMaterials().then(setGlassMaterials)
@@ -579,6 +585,75 @@ export function SystemEditor({
 
   const handleImportClick = () => {
     fileInputRef.current?.click()
+  }
+
+  const handleLoadClick = () => {
+    loadFileInputRef.current?.click()
+  }
+
+  const handleLoadFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const isLensX = file.name.toLowerCase().endsWith('.lensx') || file.name.toLowerCase().endsWith('.json')
+    if (!isLensX) {
+      setToastMessage('Please select a .lensx or .json file.')
+      return
+    }
+    try {
+      const content = await file.text()
+      parseLensXFile(content)
+      setLoadConfirmPending({ content, fileName: file.name })
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : 'Invalid LENS-X file')
+    }
+  }
+
+  const handleLoadConfirm = () => {
+    if (!loadConfirmPending) return
+    try {
+      const { surfaces, entrancePupilDiameter, wavelengths, projectName } =
+        parseLensXFile(loadConfirmPending.content)
+      onSystemStateChange((prev) => ({
+        ...prev,
+        surfaces,
+        entrancePupilDiameter,
+        wavelengths,
+        projectName,
+        traceResult: null,
+        traceError: null,
+        pendingTrace: true,
+      }))
+      setToastMessage('Project loaded successfully.')
+      setLoadConfirmPending(null)
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : 'Failed to load project')
+    }
+  }
+
+  const handleLoadCancel = () => {
+    setLoadConfirmPending(null)
+  }
+
+  const handleSaveProject = () => {
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const doc = toLensX(surfaces, {
+      projectName: systemState.projectName ?? 'Untitled',
+      date: dateStr,
+      drawnBy: 'MacOptics',
+      entrancePupilDiameter: systemState.entrancePupilDiameter,
+      referenceWavelengthNm: systemState.wavelengths[0] ?? 587.6,
+    })
+    const blob = new Blob([JSON.stringify(doc, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `project_${dateStr}.lensx`
+    a.click()
+    URL.revokeObjectURL(url)
+    setToastMessage('Project saved successfully as Lens-X.')
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -730,23 +805,51 @@ export function SystemEditor({
   return (
     <div className="p-4">
       <div className="flex items-center justify-between gap-4 mb-4">
-        <h2 className="text-cyan-electric font-semibold text-lg">System Editor</h2>
         <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,.svg,.csv"
-            onChange={handleFileChange}
-            className="hidden"
-            aria-hidden
-          />
+          <h2 className="text-cyan-electric font-semibold text-lg">System Editor</h2>
+          <div className="flex items-center gap-2 rounded-lg bg-slate-800/50 backdrop-blur-sm border border-white/10 px-2 py-1.5">
+            <input
+              ref={loadFileInputRef}
+              type="file"
+              accept=".lensx,.json"
+              onChange={handleLoadFileChange}
+              className="hidden"
+              aria-hidden
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,.svg,.csv"
+              onChange={handleFileChange}
+              className="hidden"
+              aria-hidden
+            />
+            <button
+              type="button"
+              onClick={handleLoadClick}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-slate-200 hover:text-cyan-electric hover:bg-white/5 transition-colors"
+            >
+              <FolderOpen className="w-4 h-4" />
+              Load Project
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveProject}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-slate-200 hover:text-cyan-electric hover:bg-white/5 transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              Save Project
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg bg-slate-800/50 backdrop-blur-sm border border-white/10 px-2 py-1.5">
           <button
             type="button"
             onClick={handleImportClick}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-cyan-electric border border-cyan-electric/50 hover:bg-cyan-electric/10 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-slate-200 hover:text-cyan-electric hover:bg-white/5 transition-colors"
           >
             <FileUp className="w-4 h-4" />
-            Import
+            Add Surface from File
           </button>
         </div>
       </div>
@@ -1242,6 +1345,55 @@ export function SystemEditor({
               </div>
             </div>
           </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+      {ReactDOM.createPortal(
+        <AnimatePresence>
+          {loadConfirmPending && (
+            <motion.div
+              key="load-confirm-modal"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xl p-4"
+              onClick={(e) => e.target === e.currentTarget && handleLoadCancel()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="load-confirm-title"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-md rounded-xl border border-slate-600/80 bg-slate-900/80 shadow-2xl backdrop-blur-xl p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="load-confirm-title" className="text-lg font-semibold text-cyan-electric mb-3">
+                  Load Project
+                </h3>
+                <p className="text-slate-300 text-sm mb-6">
+                  Loading a project will overwrite your current surfaces. Do you want to proceed?
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLoadCancel}
+                    className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLoadConfirm}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-slate-900 bg-cyan-electric hover:bg-cyan-400"
+                  >
+                    Proceed
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
           )}
         </AnimatePresence>,
         document.body

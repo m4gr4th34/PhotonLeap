@@ -35,6 +35,11 @@
     "date": "YYYY-MM-DD",
     "drawn_by": "string"
   },
+  "system_settings": {
+    "mc_iterations": 1000,
+    "mc_seed": 42,
+    "target_yield": 0.95
+  },
   "optics": {
     "surfaces": [ /* LensXSurface[] */ ],
     "entrance_pupil_diameter": 10
@@ -52,6 +57,10 @@
 | `metadata.project_name` | string | No | Project title |
 | `metadata.date` | string | No | ISO date |
 | `metadata.drawn_by` | string | No | Author/tool name |
+| `system_settings` | object | No | Global Monte Carlo simulation settings |
+| `system_settings.mc_iterations` | number | No | Number of Monte Carlo trials; default 1000 |
+| `system_settings.mc_seed` | number | No | Random seed for reproducibility; default 42 |
+| `system_settings.target_yield` | number | No | Target yield fraction (0–1); default 0.95 |
 | `optics` | object | Yes | Optical definition |
 | `optics.surfaces` | array | Yes | Ordered list of surfaces |
 | `optics.entrance_pupil_diameter` | number | No | mm; default 10 |
@@ -128,6 +137,25 @@ n²(λ) = 1 + Σᵢ Bᵢ λ² / (λ² − Cᵢ)
 
 ---
 
+## Tolerances (per surface, Monte Carlo)
+
+Per-surface tolerances for Monte Carlo sensitivity analysis. All values are symmetric ± unless noted.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tolerances` | object | No | Monte Carlo tolerance block |
+| `tolerances.radius_tol` | number | No | ± radius tolerance (Delta R) in mm |
+| `tolerances.thickness_tol` | number | No | ± thickness tolerance (Delta T) in mm |
+| `tolerances.decenter_x` | number | No | Decenter in x (mm) |
+| `tolerances.decenter_y` | number | No | Decenter in y (mm) |
+| `tolerances.tilt_x` | number | No | Tilt tolerance about x-axis (degrees) |
+| `tolerances.tilt_y` | number | No | Tilt tolerance about y-axis (degrees) |
+| `tolerances.index_tol` | number | No | ± refractive index tolerance (Delta n) |
+
+When `tolerances` is omitted, Monte Carlo uses defaults (e.g. 0 for decenter/tilt; manufacturing tolerances for radius/thickness when available).
+
+---
+
 ## LensXSurface (strict type)
 
 ```typescript
@@ -148,6 +176,15 @@ interface LensXSurface {
     radius_tolerance?: number
     thickness_tolerance?: number
     tilt_tolerance?: number
+  }
+  tolerances?: {
+    radius_tol: number     // Delta R in mm
+    thickness_tol: number  // Delta T in mm
+    decenter_x: number      // mm
+    decenter_y: number     // mm
+    tilt_x: number         // degrees
+    tilt_y: number         // degrees
+    index_tol: number      // Delta n
   }
 }
 ```
@@ -170,6 +207,13 @@ interface LensXSurface {
 | `manufacturing.radius_tolerance` | `radiusTolerance` |
 | `manufacturing.thickness_tolerance` | `thicknessTolerance` |
 | `manufacturing.tilt_tolerance` | `tiltTolerance` |
+| `tolerances.radius_tol` | Monte Carlo radius ± |
+| `tolerances.thickness_tol` | Monte Carlo thickness ± |
+| `tolerances.decenter_x` | Monte Carlo decenter x |
+| `tolerances.decenter_y` | Monte Carlo decenter y |
+| `tolerances.tilt_x` | Monte Carlo tilt x |
+| `tolerances.tilt_y` | Monte Carlo tilt y |
+| `tolerances.index_tol` | Monte Carlo index ± |
 
 ---
 
@@ -191,6 +235,11 @@ A JSON document is LENS-X if:
     "date": "2026-02-15",
     "drawn_by": "MacOptics"
   },
+  "system_settings": {
+    "mc_iterations": 1000,
+    "mc_seed": 42,
+    "target_yield": 0.95
+  },
   "optics": {
     "surfaces": [
       {
@@ -208,6 +257,15 @@ A JSON document is LENS-X if:
           "surface_quality": "3/2",
           "radius_tolerance": 0.1,
           "thickness_tolerance": 0.05
+        },
+        "tolerances": {
+          "radius_tol": 0.1,
+          "thickness_tol": 0.05,
+          "decenter_x": 0,
+          "decenter_y": 0,
+          "tilt_x": 0.1,
+          "tilt_y": 0.1,
+          "index_tol": 0.0005
         }
       },
       {
