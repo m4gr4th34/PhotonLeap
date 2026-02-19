@@ -375,6 +375,7 @@ function CoatingCombobox({
     >
       <button
         type="button"
+        data-testid={`coating-option-${c.name.replace(/\s+/g, '-')}`}
         onClick={(e) => {
           e.stopPropagation()
           handleSelect(c)
@@ -830,14 +831,15 @@ export function SystemEditor({
         <div className="flex items-center gap-2">
           <h2 className="text-cyan-electric font-semibold text-lg">System Editor</h2>
           <div className="flex items-center gap-2 rounded-lg bg-slate-800/50 backdrop-blur-sm border border-white/10 px-2 py-1.5">
-            <input
-              ref={loadFileInputRef}
-              type="file"
-              accept=".lensx,.json"
-              onChange={handleLoadFileChange}
-              className="hidden"
-              aria-hidden
-            />
+          <input
+            ref={loadFileInputRef}
+            type="file"
+            accept=".lensx,.json"
+            onChange={handleLoadFileChange}
+            className="hidden"
+            aria-hidden
+            data-testid="load-project-input"
+          />
             <input
               ref={fileInputRef}
               type="file"
@@ -848,6 +850,7 @@ export function SystemEditor({
             />
             <button
               type="button"
+              data-testid="load-project"
               onClick={handleLoadClick}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-slate-200 hover:text-cyan-electric hover:bg-white/5 transition-colors"
             >
@@ -979,6 +982,7 @@ export function SystemEditor({
                 <td className="py-2 pr-4">
                   <input
                     type="number"
+                    data-testid={`surface-${i}-radius`}
                     value={s.radius}
                     onChange={(e) => updateSurface(s.id, { radius: Number(e.target.value) || 0 })}
                     onClick={(e) => e.stopPropagation()}
@@ -1029,7 +1033,7 @@ export function SystemEditor({
                     onClick={(e) => e.stopPropagation()}
                   />
                 </td>
-                <td className="py-2 pr-3 min-w-[8rem]">
+                <td className="py-2 pr-3 min-w-[8rem]" data-testid={`surface-${i}-coating-cell`}>
                   <CoatingCombobox
                     value={s.coating ?? ''}
                     coatings={coatings}
@@ -1076,6 +1080,7 @@ export function SystemEditor({
                 <td className="py-2 pr-3">
                   <input
                     type="number"
+                    data-testid={`surface-${i}-tilt`}
                     value={s.tiltTolerance ?? ''}
                     placeholder="0"
                     min={0}
@@ -1442,6 +1447,7 @@ export function SystemEditor({
                   </button>
                   <button
                     type="button"
+                    data-testid="load-confirm-proceed"
                     onClick={handleLoadConfirm}
                     className="px-4 py-2 rounded-lg text-sm font-medium text-slate-900 bg-cyan-electric hover:bg-cyan-400"
                   >

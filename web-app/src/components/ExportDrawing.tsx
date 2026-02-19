@@ -168,6 +168,7 @@ export function ExportDrawing({
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
+            data-testid="export-lensx-json"
             onClick={handleExportLensX}
             className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all bg-cyan-electric/20 text-cyan-electric border border-cyan-electric/50 hover:bg-cyan-electric/30"
           >

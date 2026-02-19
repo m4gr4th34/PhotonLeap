@@ -37,6 +37,7 @@ export function NavBar({ activeTab, onTabChange, loadedFileName }: NavBarProps) 
           return (
             <button
               key={item.id}
+              data-testid={`nav-${item.id}`}
               onClick={() => onTabChange(item.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
                 isActive

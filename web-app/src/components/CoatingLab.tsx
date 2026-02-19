@@ -234,6 +234,7 @@ export function CoatingLab() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            data-testid="coating-browse-catalog"
             onClick={() => setCatalogOpen(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/80 backdrop-blur-md border border-white/10 text-slate-200 hover:border-cyan-400/40 hover:bg-slate-800 transition-colors"
           >
@@ -255,7 +256,7 @@ export function CoatingLab() {
       </div>
 
       {/* Spectral Performance Graph */}
-      <div className="rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-md p-6 shadow-xl">
+      <div data-testid="spectral-performance-graph" className="rounded-xl border border-white/10 bg-slate-900/80 backdrop-blur-md p-6 shadow-xl">
         <h3 className="text-lg font-medium text-slate-200 mb-4 flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-cyan-400" />
           Spectral Performance R(λ)
@@ -380,6 +381,7 @@ export function CoatingLab() {
                         <button
                           key={c.name}
                           type="button"
+                          data-testid={`coating-catalog-${c.name.replace(/\s+/g, '-')}`}
                           onClick={() => {
                             setSelectedCoating(c)
                             setCatalogOpen(false)

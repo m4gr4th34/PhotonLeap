@@ -1,0 +1,20 @@
+---
+description: Playwright E2E testing and failure analysis
+globs: "**/*.spec.ts"
+alwaysApply: false
+---
+
+# Playwright Testing
+
+## When a Test Fails
+
+**Analyze the Trace Viewer logs immediately** to distinguish between:
+
+| Symptom | Likely cause | Action |
+|---------|--------------|--------|
+| Element not found, timeout on locator | **Broken test** (locator issue) | Update selector; use `data-testid`, role, or stable text |
+| Element found but assertion fails | **Broken feature** (logic issue) | Fix application code |
+| Page didn't load, wrong URL | **Broken test** (env/routing) | Check baseURL, webServer config |
+| Flaky pass/fail on retry | **Broken test** (race condition) | Add `waitFor` or explicit waits |
+
+**Trace Viewer** — Run `npx playwright show-trace test-results/.../trace.zip` to inspect DOM snapshots, network, console, and action timeline. Use it before changing code.
