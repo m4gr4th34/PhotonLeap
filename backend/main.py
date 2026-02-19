@@ -11,7 +11,7 @@ import numpy as np
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +47,31 @@ class SurfaceSchema(BaseModel):
     radiusTolerance: Optional[float] = None
     thicknessTolerance: Optional[float] = None
     tiltTolerance: Optional[float] = None
+
+
+class GlassMaterial(BaseModel):
+    """Optical glass material with Sellmeier dispersion."""
+    name: str
+    dispersion_formula: str
+    coefficients: Dict[str, Any]
+
+
+@app.get("/api/materials", response_model=List[GlassMaterial])
+def get_materials():
+    """
+    Return the material library for the optical design system.
+    Includes Sellmeier coefficients for n(λ) calculation.
+    """
+    from glass_materials import get_all_materials
+    materials = get_all_materials()
+    return [
+        GlassMaterial(
+            name=m.get("name", ""),
+            dispersion_formula=m.get("dispersion_formula", "constant"),
+            coefficients=m.get("coefficients", {}),
+        )
+        for m in materials
+    ]
 
 
 class OpticalStackRequest(BaseModel):

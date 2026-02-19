@@ -42,7 +42,7 @@ def _jitter_surfaces(surfaces, rng=None, only_surface_idx=None):
 
 def _run_single_monte_carlo(optical_stack, surfaces_list, rng, num_rays, epd, wvl_nm, field_angles):
     """Run one Monte Carlo iteration and return spots + focus_z. Returns (spots, focus_z) or (None, 0)."""
-    surf_data_list = optical_stack_to_surf_data(surfaces_list)
+    surf_data_list = optical_stack_to_surf_data(surfaces_list, wvl_nm=wvl_nm)
     surface_diameters = [float(s.get("diameter", 25) or 25) for s in surfaces_list]
     try:
         opt_model = build_singlet_from_surface_data(

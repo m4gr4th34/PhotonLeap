@@ -310,21 +310,24 @@ def _precompute_metrics_sweep(rays, num_points=100, rays_by_field=None):
     return result
 
 
-def optical_stack_to_surf_data(surfaces):
+def optical_stack_to_surf_data(surfaces, wvl_nm=587.6):
     """
     Convert frontend surfaces to rayoptics surf_data_list [curvature, thickness, n, v].
 
     Each row provides 'n' (refractive index) for the medium after that surface.
-    At each interface, Snell's Law (n₁sinθ₁ = n₂sinθ₂) is applied using:
-    - n₁ = n from the previous row (medium before the surface)
-    - n₂ = n from the current row (medium after the surface)
+    If material name is in the glass library, n(λ) is computed from Sellmeier;
+    otherwise uses refractiveIndex from the surface.
     Object space is assumed n=1 (air).
     """
+    from glass_materials import refractive_index_at_wavelength
+
     surf_data_list = []
     for s in surfaces:
         r = float(s.get("radius", 0) or 0)
         t = float(s.get("thickness", 0) or 0)
-        n = float(s.get("refractiveIndex", 1) or 1)
+        n_fallback = float(s.get("refractiveIndex", 1) or 1)
+        material = s.get("material") or ""
+        n = refractive_index_at_wavelength(wvl_nm, material, n_fallback)
         curvature = 1.0 / r if r != 0 else 0.0
         v = 64.2 if (s.get("type") == "Glass" and n > 1.01) else 0.0
         surf_data_list.append([curvature, t, n, v])
@@ -353,7 +356,7 @@ def run_trace(optical_stack: dict) -> dict:
     if focus_mode not in ("On-Axis", "Balanced"):
         focus_mode = "On-Axis"
 
-    surf_data_list = optical_stack_to_surf_data(surfaces)
+    surf_data_list = optical_stack_to_surf_data(surfaces, wvl_nm=wvl_nm)
     surface_diameters = [float(s.get("diameter", 25) or 25) for s in surfaces]  # diameter in mm
 
     try:
