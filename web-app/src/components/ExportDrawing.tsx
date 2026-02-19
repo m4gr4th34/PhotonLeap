@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { FileDown, Printer } from 'lucide-react'
 import type { SystemState } from '../types/system'
 import { generateIso10110Svg } from '../lib/iso10110_blueprint'
+import { toLensX } from '../lib/lensX'
 
 type ExportDrawingProps = {
   systemState: SystemState
@@ -32,6 +33,24 @@ export function ExportDrawing({
     const a = document.createElement('a')
     a.href = url
     a.download = `optical-drawing-${date}.svg`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [systemState, projectName, date, drawnBy])
+
+  const handleExportLensX = useCallback(() => {
+    const lensX = toLensX(systemState.surfaces, {
+      projectName: projectName || 'Untitled',
+      date,
+      drawnBy,
+      entrancePupilDiameter: systemState.entrancePupilDiameter ?? 10,
+    })
+    const blob = new Blob([JSON.stringify(lensX, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lens-x-${projectName.replace(/\s+/g, '-')}-${date}.json`
     a.click()
     URL.revokeObjectURL(url)
   }, [systemState, projectName, date, drawnBy])
@@ -131,8 +150,16 @@ export function ExportDrawing({
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={handleExportSvg}
+            onClick={handleExportLensX}
             className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all bg-cyan-electric/20 text-cyan-electric border border-cyan-electric/50 hover:bg-cyan-electric/30"
+          >
+            <FileDown className="w-4 h-4" />
+            Download LENS-X JSON
+          </button>
+          <button
+            type="button"
+            onClick={handleExportSvg}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all bg-white/10 text-slate-200 border border-white/20 hover:bg-white/20"
           >
             <FileDown className="w-4 h-4" />
             Download SVG

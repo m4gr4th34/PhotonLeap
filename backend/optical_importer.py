@@ -144,10 +144,92 @@ def _parse_json_surfaces(data: Any) -> List[Dict[str, Any]]:
     return result
 
 
+def _is_lens_x(data: Any) -> bool:
+    """Check if JSON is LENS-X format."""
+    if not isinstance(data, dict):
+        return False
+    if data.get("lens_x_version"):
+        return True
+    if "optics" in data and isinstance(data["optics"], dict):
+        return "surfaces" in data["optics"]
+    return False
+
+
+def _surface_from_lens_x(raw: Dict[str, Any], idx: int) -> Dict[str, Any]:
+    """
+    Map LENS-X surface to our Surface model.
+    Maps physics.sellmeier into sellmeierCoefficients for material engine.
+    Ensures radius, thickness, aperture (diameter) for every surface.
+    """
+    from glass_materials import n_from_sellmeier
+
+    radius = _parse_radius(raw.get("radius"))
+    thickness = float(raw.get("thickness") or 0)
+    aperture = float(raw.get("aperture") or 12.5)
+    diameter = 2 * aperture
+    material = str(raw.get("material") or "N-BK7").strip()
+    surf_type = str(raw.get("type") or "Glass").strip()
+    if surf_type.lower() in ("air", "object", "image", "stop"):
+        surf_type = "Air"
+        material = "Air"
+        n = 1.0
+        sellmeier = None
+    else:
+        surf_type = "Glass"
+        physics = raw.get("physics") or {}
+        sellmeier = physics.get("sellmeier")
+        if sellmeier and isinstance(sellmeier, dict):
+            B = sellmeier.get("B", [0, 0, 0])
+            C = sellmeier.get("C", [1, 1, 1])
+            n = n_from_sellmeier(_DEFAULT_WVL_NM, {"B": B, "C": C})
+        else:
+            n = float(physics.get("refractive_index") or raw.get("refractive_index") or 1.52)
+            mat = get_material_by_name(material)
+            if mat:
+                n = refractive_index_at_wavelength(_DEFAULT_WVL_NM, material, n)
+
+    mfg = raw.get("manufacturing") or {}
+    result: Dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "type": surf_type,
+        "radius": radius,
+        "thickness": thickness,
+        "refractiveIndex": n,
+        "diameter": max(0.1, diameter),
+        "material": material,
+        "description": str(raw.get("description") or f"Surface {idx + 1}"),
+    }
+    if sellmeier:
+        result["sellmeierCoefficients"] = sellmeier
+    if mfg.get("surface_quality"):
+        result["surfaceQuality"] = str(mfg["surface_quality"])
+    if mfg.get("radius_tolerance") is not None:
+        result["radiusTolerance"] = float(mfg["radius_tolerance"])
+    if mfg.get("thickness_tolerance") is not None:
+        result["thicknessTolerance"] = float(mfg["thickness_tolerance"])
+    if mfg.get("tilt_tolerance") is not None:
+        result["tiltTolerance"] = float(mfg["tilt_tolerance"])
+    return result
+
+
+def _parse_lens_x(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Parse LENS-X document. Returns list of Surface objects."""
+    optics = data.get("optics") or {}
+    surfaces_raw = optics.get("surfaces") or []
+    if not isinstance(surfaces_raw, list):
+        return []
+    result: List[Dict[str, Any]] = []
+    for i, raw in enumerate(surfaces_raw):
+        if not isinstance(raw, dict):
+            continue
+        result.append(_surface_from_lens_x(raw, i))
+    return result
+
+
 def import_from_json(content: bytes) -> List[Dict[str, Any]]:
     """
-    Parse JSON lens system (Zemax-style or generic).
-    Returns list of Surface objects compatible with frontend.
+    Parse JSON lens system. Prefers LENS-X format; falls back to Zemax-style/generic.
+    LENS-X: maps physics.sellmeier into material engine.
     """
     try:
         data = json.loads(content.decode("utf-8"))
@@ -159,7 +241,10 @@ def import_from_json(content: bytes) -> List[Dict[str, Any]]:
         raise ValueError(f"Invalid JSON: {e}") from e
 
     try:
-        surfaces = _parse_json_surfaces(data)
+        if _is_lens_x(data):
+            surfaces = _parse_lens_x(data)
+        else:
+            surfaces = _parse_json_surfaces(data)
     except (KeyError, TypeError, ValueError) as e:
         logger.exception("Surface parsing error (KeyError/TypeError/ValueError): %s", e)
         raise ValueError(f"Failed to parse surfaces: {e}") from e
@@ -168,7 +253,7 @@ def import_from_json(content: bytes) -> List[Dict[str, Any]]:
         raise ValueError(f"Failed to parse surfaces: {e}") from e
 
     if not surfaces:
-        raise ValueError("No surfaces found in JSON. Expected 'surfaces' array or similar.")
+        raise ValueError("No surfaces found in JSON. Expected LENS-X optics.surfaces or surfaces array.")
     return surfaces
 
 
@@ -341,6 +426,17 @@ def _path_intersects_centerline(path, centerline_y: float) -> bool:
         return True
 
 
+def _path_has_optical_surface_tag(attrs: Dict[str, Any]) -> bool:
+    """True if path has data-type='optical-surface' (LENS-X tagged SVG)."""
+    if not attrs:
+        return False
+    for key in ("data-type", "data_type", "dataType"):
+        v = attrs.get(key)
+        if v and str(v).strip().lower() == "optical-surface":
+            return True
+    return False
+
+
 def _path_should_ignore_style(attrs: Dict[str, Any]) -> bool:
     """True if path has dashed stroke or very thin stroke (annotation style)."""
     if not attrs:
@@ -433,47 +529,64 @@ def import_from_svg(content: bytes) -> List[Dict[str, Any]]:
     # Ensure path_attrs aligns with paths (svgstr2paths may convert circles/etc to paths)
     attrs_list = path_attrs if len(path_attrs) >= len(paths) else [{}] * len(paths)
 
-    # First pass: length filter; compute centerline from curvature paths only (lens surfaces)
-    length_ok_paths: List[Tuple[int, Any, Dict[str, Any]]] = []
-    ymin_curv, ymax_curv = float('inf'), float('-inf')
-    for i, path in enumerate(paths):
+    # Heuristic filter: if any path has data-type="optical-surface", ONLY use those (legacy SVG)
+    optical_tagged: List[Tuple[int, Any, Dict[str, Any]]] = []
+    for i in range(len(paths)):
         attrs = attrs_list[i] if i < len(attrs_list) else {}
-        try:
-            plen = path.length()
-        except Exception:
-            plen = 0.0
-        if plen < _MIN_PATH_LENGTH:
-            continue
-        if _path_has_curvature(path) and not _path_should_ignore_style(attrs):
+        if _path_has_optical_surface_tag(attrs):
+            optical_tagged.append((i, paths[i], attrs))
+
+    if optical_tagged:
+        # LENS-X tagged SVG: only use paths with data-type="optical-surface"
+        length_ok_paths = []
+        for i, path, attrs in optical_tagged:
             try:
-                bbox = path.bbox()
-                if bbox:
-                    ymin_curv = min(ymin_curv, float(bbox[2]))
-                    ymax_curv = max(ymax_curv, float(bbox[3]))
+                plen = path.length()
             except Exception:
-                pass
-        length_ok_paths.append((i, path, attrs))
+                plen = 0.0
+            if plen >= _MIN_PATH_LENGTH:
+                length_ok_paths.append((i, path, attrs))
+        if not length_ok_paths:
+            length_ok_paths = list(optical_tagged)
+    else:
+        # Legacy SVG: heuristic filter (length, centerline, shape, style)
+        length_ok_paths = []
+        ymin_curv, ymax_curv = float('inf'), float('-inf')
+        for i, path in enumerate(paths):
+            attrs = attrs_list[i] if i < len(attrs_list) else {}
+            try:
+                plen = path.length()
+            except Exception:
+                plen = 0.0
+            if plen < _MIN_PATH_LENGTH:
+                continue
+            if _path_has_curvature(path) and not _path_should_ignore_style(attrs):
+                try:
+                    bbox = path.bbox()
+                    if bbox:
+                        ymin_curv = min(ymin_curv, float(bbox[2]))
+                        ymax_curv = max(ymax_curv, float(bbox[3]))
+                except Exception:
+                    pass
+            length_ok_paths.append((i, path, attrs))
 
-    # Use centerline from curvature paths (lens) if any; else viewport center
-    if ymin_curv <= ymax_curv:
-        centerline_y = (ymin_curv + ymax_curv) / 2.0
+        # Use centerline from curvature paths (lens) if any; else viewport center
+        if ymin_curv <= ymax_curv:
+            centerline_y = (ymin_curv + ymax_curv) / 2.0
 
-    # Filter: axis intersection, shape, style
+    # Filter: for legacy SVG, apply axis intersection, shape, style; for tagged SVG, use as-is
     filtered_paths: List[Any] = []
-    for i, path, attrs in length_ok_paths:
-        # Filter by axis intersection: must cross horizontal centerline
-        if not _path_intersects_centerline(path, centerline_y):
-            continue
-
-        # Shape heuristic: ignore perfectly straight horizontal lines (dimension/axis)
-        if _path_is_straight_horizontal(path):
-            continue
-
-        # Style filter: ignore dashed or very thin stroke
-        if _path_should_ignore_style(attrs):
-            continue
-
-        filtered_paths.append(path)
+    if optical_tagged:
+        filtered_paths = [p for _, p, _ in length_ok_paths]
+    else:
+        for i, path, attrs in length_ok_paths:
+            if not _path_intersects_centerline(path, centerline_y):
+                continue
+            if _path_is_straight_horizontal(path):
+                continue
+            if _path_should_ignore_style(attrs):
+                continue
+            filtered_paths.append(path)
 
     # Extract infos from filtered paths
     infos: List[Tuple[Optional[float], float, float]] = []

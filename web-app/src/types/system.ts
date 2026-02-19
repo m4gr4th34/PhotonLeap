@@ -17,6 +17,8 @@ export type Surface = {
   absorptionCoefficient?: number
   /** ISO 10110 surface quality (scratch/dig), e.g. "3/2" */
   surfaceQuality?: string
+  /** Sellmeier coefficients { B, C } from LENS-X import — used by trace when material not in library */
+  sellmeierCoefficients?: { B: number[]; C: number[] }
 }
 
 export type MetricsAtZ = {

@@ -4,6 +4,7 @@
  */
 
 import type { SystemState } from '../types/system'
+import { getISOString } from './iso10110'
 
 /** Compute cumulative Z positions (mm) */
 function computeCumulativeZ(surfaces: { thickness: number }[]): number[] {
@@ -219,7 +220,7 @@ export function generateIso10110Svg(
       } else {
         const s = surfaces[r - 1]
         const ct = r > 1 ? (surfaces[r - 2]?.thickness ?? 0) : null
-        const sd = s.surfaceQuality ?? '3/2'
+        const sd = getISOString(s)
         const mat = truncate(s.material || (s.type === 'Air' ? 'Air' : '—'), 14)
         const val = c === 0 ? String(r) : c === 1 ? sd : c === 2 ? mat : ct != null ? ct.toFixed(2) : '—'
         tableSvg += `<text x="${cx}" y="${cy}" font-size="10" fill="#e2e8f0" text-anchor="middle">${escapeXml(val)}</text>`
@@ -263,9 +264,9 @@ export function generateIso10110Svg(
   <rect width="100%" height="100%" fill="#0f172a"/>
   <text x="${margin}" y="${margin + 12}" font-size="14" font-weight="bold" fill="#22D3EE">ISO 10110 Optical Drawing</text>
 
-  <!-- Cross-section (left) -->
-  <path d="${surfacePaths}" fill="none" stroke="#22D3EE" stroke-width="1.5"/>
-  ${glassPaths.map((p) => `<path d="${p}" fill="rgba(34,211,238,0.15)" stroke="#22D3EE" stroke-width="1"/>`).join('\n  ')}
+  <!-- Cross-section (left) - data-type="optical-surface" for LENS-X SVG import -->
+  <path d="${surfacePaths}" fill="none" stroke="#22D3EE" stroke-width="1.5" data-type="optical-surface"/>
+  ${glassPaths.map((p) => `<path d="${p}" fill="rgba(34,211,238,0.15)" stroke="#22D3EE" stroke-width="1" data-type="optical-surface"/>`).join('\n  ')}
 
   <!-- Dimension lines -->
   ${dimElements.map((d) => `<path d="${d}" class="dim-line"/>`).join('\n  ')}

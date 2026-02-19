@@ -321,13 +321,19 @@ def optical_stack_to_surf_data(surfaces, wvl_nm=587.6):
     """
     from glass_materials import refractive_index_at_wavelength
 
+    from glass_materials import n_from_sellmeier
+
     surf_data_list = []
     for s in surfaces:
         r = float(s.get("radius", 0) or 0)
         t = float(s.get("thickness", 0) or 0)
         n_fallback = float(s.get("refractiveIndex", 1) or 1)
         material = s.get("material") or ""
-        n = refractive_index_at_wavelength(wvl_nm, material, n_fallback)
+        sellmeier = s.get("sellmeierCoefficients")
+        if sellmeier and isinstance(sellmeier, dict):
+            n = n_from_sellmeier(wvl_nm, sellmeier)
+        else:
+            n = refractive_index_at_wavelength(wvl_nm, material, n_fallback)
         curvature = 1.0 / r if r != 0 else 0.0
         v = 64.2 if (s.get("type") == "Glass" and n > 1.01) else 0.0
         surf_data_list.append([curvature, t, n, v])
