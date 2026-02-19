@@ -1,11 +1,11 @@
-import { Circle, Layers, Info, Settings, FileCode } from 'lucide-react'
+import { Circle, Layers, BookOpen, Settings, FileCode } from 'lucide-react'
 
 export type NavTab = 'lens' | 'system' | 'info' | 'properties' | 'export'
 
 const navItems: { id: NavTab; label: string; icon: typeof Circle }[] = [
   { id: 'lens', label: 'Lens Designer', icon: Circle },
   { id: 'system', label: 'System Editor', icon: Layers },
-  { id: 'info', label: 'Info', icon: Info },
+  { id: 'info', label: 'User Guide', icon: BookOpen },
   { id: 'properties', label: 'Properties', icon: Settings },
   { id: 'export', label: 'Export', icon: FileCode },
 ]
