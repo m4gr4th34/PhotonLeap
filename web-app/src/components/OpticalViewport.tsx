@@ -1419,11 +1419,11 @@ export function OpticalViewport({
           </motion.div>
 
           <motion.div
-            className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded-full text-xs text-slate-300 pointer-events-none bg-slate-900/50 backdrop-blur-[8px] border border-white/10"
-            initial={{ opacity: 0, y: 20 }}
+            className="absolute bottom-0 left-0 z-[5] ml-5 mb-5 px-4 py-2 rounded-full text-xs text-slate-300 pointer-events-none bg-slate-900/50 backdrop-blur-[8px] border border-white/10"
+            initial={{ opacity: 0, x: -20 }}
             animate={{
               opacity: hintVisible ? 1 : 0,
-              y: hintVisible ? 0 : 20,
+              x: hintVisible ? 0 : -20,
             }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
           >
