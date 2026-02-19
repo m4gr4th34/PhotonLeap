@@ -123,34 +123,65 @@ export function generateIso10110Svg(
     }
   }
 
-  // Dimension lines — stagger labels above/below to prevent overlap
+  // Dimension lines — assign bands to avoid horizontal overlap (label ~60px wide)
   const dimElements: string[] = []
   const dimLabels: { x: number; y: number; text: string }[] = []
   const tickLen = 4
-  const yDimAbove = oy - yExtent * scale - 22
-  const yDimBelow = oy + yExtent * scale + 32
+  const numBands = 6
+  const bandSpacing = 22
+  const labelHalfWidth = 32
+  const yDimAbove = oy - yExtent * scale - 35
+  const yDimBelow = oy + yExtent * scale + 28
 
+  const dims: { i: number; midX: number; x1: number; x2: number; ct: number }[] = []
   for (let i = 0; i < surfaces.length - 1; i++) {
     const s = surfaces[i]
     const z = zPositions[i] ?? 0
     const zNext = zPositions[i + 1] ?? z + s.thickness
-    const ct = s.thickness ?? 0
     const x1 = ox + z * scale
     const x2 = ox + zNext * scale
-    const useAbove = i % 2 === 0
-    const yLine = useAbove ? yDimAbove + 14 : yDimBelow - 14
-    const yLabel = useAbove ? yDimAbove : yDimBelow + 12
+    dims.push({ i, midX: (x1 + x2) / 2, x1, x2, ct: s.thickness ?? 0 })
+  }
+
+  const bandOccupied: { band: number; maxRight: number }[] = []
+
+  for (const d of dims) {
+    const left = d.midX - labelHalfWidth
+    const right = d.midX + labelHalfWidth
+    let band = 0
+    for (; band < numBands; band++) {
+      const prev = bandOccupied.find((b) => b.band === band)
+      if (!prev || prev.maxRight < left) {
+        if (prev) prev.maxRight = right
+        else bandOccupied.push({ band, maxRight: right })
+        break
+      }
+    }
+    if (band >= numBands) {
+      band = 0
+      const p = bandOccupied.find((b) => b.band === 0)
+      if (p) p.maxRight = Math.max(p.maxRight, right)
+      else bandOccupied.push({ band: 0, maxRight: right })
+    }
+
+    const useAbove = band < numBands / 2
+    const yLine = useAbove
+      ? yDimAbove + 14 + (band % 3) * (bandSpacing / 2)
+      : yDimBelow - 14 - (band % 3) * (bandSpacing / 2)
+    const yLabel = useAbove
+      ? yDimAbove + (band % 3) * (bandSpacing / 2) - 2
+      : yDimBelow + (band % 3) * (bandSpacing / 2) + 14
 
     dimElements.push(
-      `M ${x1.toFixed(2)} ${oy} L ${x1.toFixed(2)} ${yLine}`,
-      `M ${x2.toFixed(2)} ${oy} L ${x2.toFixed(2)} ${yLine}`,
-      `M ${x1.toFixed(2)} ${yLine} L ${x2.toFixed(2)} ${yLine}`,
-      `M ${x1.toFixed(2)} ${(yLine - tickLen).toFixed(2)} L ${x1.toFixed(2)} ${(yLine + tickLen).toFixed(2)}`,
-      `M ${x2.toFixed(2)} ${(yLine - tickLen).toFixed(2)} L ${x2.toFixed(2)} ${(yLine + tickLen).toFixed(2)}`
+      `M ${d.x1.toFixed(2)} ${oy} L ${d.x1.toFixed(2)} ${yLine}`,
+      `M ${d.x2.toFixed(2)} ${oy} L ${d.x2.toFixed(2)} ${yLine}`,
+      `M ${d.x1.toFixed(2)} ${yLine} L ${d.x2.toFixed(2)} ${yLine}`,
+      `M ${d.x1.toFixed(2)} ${(yLine - tickLen).toFixed(2)} L ${d.x1.toFixed(2)} ${(yLine + tickLen).toFixed(2)}`,
+      `M ${d.x2.toFixed(2)} ${(yLine - tickLen).toFixed(2)} L ${d.x2.toFixed(2)} ${(yLine + tickLen).toFixed(2)}`
     )
-    dimLabels.push({ x: (x1 + x2) / 2, y: yLabel, text: `CT ${ct.toFixed(2)} mm` })
+    dimLabels.push({ x: d.midX, y: yLabel, text: `CT ${d.ct.toFixed(2)} mm` })
   }
-  const yTot = oy + yExtent * scale + 45
+  const yTot = oy + yExtent * scale + 68
   const x0 = ox
   const xEnd = ox + totalLength * scale
   dimElements.push(
@@ -168,13 +199,13 @@ export function generateIso10110Svg(
 
   // Data table — grid with individual bordered cells
   const tableX = margin + leftW + gap + 10
-  const tableY = margin + 24
+  const tableY = margin + 36
   const rowH = 26
   const colW = [44, 56, 100, 72]
   const tableWidth = colW.reduce((a, b) => a + b, 0)
   const headers = ['Surf', 'S/D 3/2', 'Material', 'CT (mm)']
 
-  let tableSvg = ''
+  let tableSvg = `<text x="${tableX}" y="${margin + 22}" font-size="9" fill="#64748b">Surface Quality (Scratch/Dig) per ISO 10110 — see S/D column</text>`
   for (let r = 0; r <= surfaces.length; r++) {
     const y = tableY + r * rowH
     let x = tableX
@@ -198,13 +229,14 @@ export function generateIso10110Svg(
   }
   const tableHeight = (surfaces.length + 1) * rowH
 
-  // Title block — labeled fields
+  // Title block — grey box with label+value rows neatly inside
   const tbX = tableX
   const tbY = tableY + tableHeight + 20
   const tbW = tableWidth
-  const tbH = 90
-  const fieldH = 26
-  const labelW = 88
+  const tbH = 98
+  const fieldH = 28
+  const pad = 12
+  const labelW = 82
 
   const titleFields = [
     { label: 'Project Name:', value: projectName || '' },
@@ -214,10 +246,13 @@ export function generateIso10110Svg(
 
   let titleSvg = `<rect x="${tbX}" y="${tbY}" width="${tbW}" height="${tbH}" fill="rgba(30,41,59,0.95)" stroke="#475569" stroke-width="1" rx="4"/>`
   titleFields.forEach((f, i) => {
-    const fy = tbY + 14 + i * (fieldH + 6)
-    titleSvg += `<text x="${tbX + 10}" y="${fy + 16}" font-size="10" fill="#64748b">${escapeXml(f.label)}</text>`
-    titleSvg += `<rect x="${tbX + labelW}" y="${fy}" width="${tbW - labelW - 12}" height="${fieldH}" fill="rgba(15,23,42,0.8)" stroke="#334155" stroke-width="0.6" rx="2"/>`
-    titleSvg += `<text x="${tbX + labelW + 8}" y="${fy + 16}" font-size="10" fill="#e2e8f0">${escapeXml(f.value)}</text>`
+    const fy = tbY + pad + i * fieldH
+    const labelX = tbX + pad
+    const valueX = tbX + labelW + pad
+    const valueW = tbW - labelW - pad * 2
+    titleSvg += `<text x="${labelX}" y="${fy + 18}" font-size="10" fill="#94a3b8">${escapeXml(f.label)}</text>`
+    titleSvg += `<rect x="${valueX}" y="${fy + 2}" width="${valueW}" height="${fieldH - 4}" fill="rgba(15,23,42,0.9)" stroke="#334155" stroke-width="0.5" rx="2"/>`
+    titleSvg += `<text x="${valueX + 8}" y="${fy + 18}" font-size="10" fill="#e2e8f0">${escapeXml(f.value)}</text>`
   })
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -236,11 +271,7 @@ export function generateIso10110Svg(
   ${dimElements.map((d) => `<path d="${d}" class="dim-line"/>`).join('\n  ')}
   ${dimLabels.map((l) => `<text x="${l.x}" y="${l.y}" font-size="10" fill="#94a3b8" text-anchor="middle">${l.text}</text>`).join('\n  ')}
 
-  <!-- Surface Quality annotation (points to first optical surface) -->
-  <text x="${ox - 12}" y="${oy - yExtent * scale - 8}" font-size="9" fill="#64748b" text-anchor="end">Surface Quality (Scratch/Dig)</text>
-  <line x1="${ox}" y1="${oy - yExtent * scale * 0.6}" x2="${ox + totalLength * scale * 0.2}" y2="${oy}" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4 2"/>
-
-  <!-- Data table (right) -->
+  <!-- Data table (right) — Surface Quality note placed here to avoid overlap with dimension labels -->
   ${tableSvg}
 
   <!-- Title block -->
