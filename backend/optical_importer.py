@@ -5,6 +5,7 @@ Maps imported data to the Surface model (Radius, Thickness, Material, Aperture).
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -215,11 +216,198 @@ def _extract_surface_info_from_path(path) -> Tuple[Optional[float], float, float
     return radius, center_x, diameter
 
 
+# Default pixel values when SVG uses percentages (avoids float("100%") crash)
+_DEFAULT_SVG_WIDTH = 800
+_DEFAULT_SVG_HEIGHT = 600
+
+# SVG noise filters
+_MIN_PATH_LENGTH = 5.0  # Ignore paths shorter than this (arrows, text fragments)
+_DEDUP_TOLERANCE = 0.1  # Paths within this distance are considered duplicates
+_MIN_STROKE_WIDTH = 0.5  # Paths with stroke-width below this are likely annotations
+
+
+def _sanitize_svg_for_parsing(svg_str: str) -> str:
+    """
+    Sanitize SVG string before passing to svgpathtools.
+    - Replaces width/height="100%" with pixel defaults (800x600); strips % from other values
+    - Replaces viewBox percentages with defaults
+    - Strips '%' from all numeric attribute values (cx, cy, r, etc.) so float() won't fail
+    """
+    # width="100%" or width='100%' -> width="800"; other width="N%" -> width="N"
+    def _replace_width(m: re.Match) -> str:
+        val = (m.group(1) or "").strip()
+        if val in ("100", "100.0", "100.00"):
+            return f'width="{_DEFAULT_SVG_WIDTH}"'
+        return f'width="{val}"' if val else f'width="{_DEFAULT_SVG_WIDTH}"'
+
+    svg_str = re.sub(
+        r'\bwidth\s*=\s*["\']([^"\']*?)%["\']',
+        lambda m: _replace_width(m),
+        svg_str,
+        flags=re.IGNORECASE,
+    )
+    # height: same logic
+    def _replace_height(m: re.Match) -> str:
+        val = (m.group(1) or "").strip()
+        if val in ("100", "100.0", "100.00"):
+            return f'height="{_DEFAULT_SVG_HEIGHT}"'
+        return f'height="{val}"' if val else f'height="{_DEFAULT_SVG_HEIGHT}"'
+
+    svg_str = re.sub(
+        r'\bheight\s*=\s*["\']([^"\']*?)%["\']',
+        lambda m: _replace_height(m),
+        svg_str,
+        flags=re.IGNORECASE,
+    )
+    # viewBox="0 0 100% 100%" -> "0 0 800 600"
+    svg_str = re.sub(
+        r'\bviewBox\s*=\s*["\']0\s+0\s+\d*\.?\d*%\s+\d*\.?\d*%["\']',
+        f'viewBox="0 0 {_DEFAULT_SVG_WIDTH} {_DEFAULT_SVG_HEIGHT}"',
+        svg_str,
+        flags=re.IGNORECASE,
+    )
+    # Strip % from remaining numeric attribute values: ="50%" -> ="50"
+    # Handles cx, cy, r, rx, ry, x, y in path/circle/ellipse
+    svg_str = re.sub(r'=\s*["\'](\d*\.?\d+)%["\']', r'="\1"', svg_str)
+    return svg_str
+
+
+def _get_viewport_from_svg(svg_str: str) -> Tuple[float, float]:
+    """Extract viewport width and height from viewBox or width/height attributes."""
+    # viewBox="0 0 W H" or viewBox="minX minY W H"
+    m = re.search(r'\bviewBox\s*=\s*["\']([^"\']+)["\']', svg_str, re.IGNORECASE)
+    if m:
+        parts = m.group(1).split()
+        if len(parts) >= 4:
+            try:
+                w, h = float(parts[2]), float(parts[3])
+                if w > 0 and h > 0:
+                    return w, h
+            except (ValueError, IndexError):
+                pass
+    # width/height attributes
+    wm = re.search(r'\bwidth\s*=\s*["\']([^"\']+)["\']', svg_str, re.IGNORECASE)
+    hm = re.search(r'\bheight\s*=\s*["\']([^"\']+)["\']', svg_str, re.IGNORECASE)
+    w = _DEFAULT_SVG_WIDTH
+    h = _DEFAULT_SVG_HEIGHT
+    if wm:
+        try:
+            w = float(re.sub(r'[^\d.]', '', wm.group(1)) or w)
+        except ValueError:
+            pass
+    if hm:
+        try:
+            h = float(re.sub(r'[^\d.]', '', hm.group(1)) or h)
+        except ValueError:
+            pass
+    return w, h
+
+
+def _path_has_curvature(path) -> bool:
+    """True if path contains Arc, QuadraticBezier, or CubicBezier segments."""
+    for seg in path:
+        name = type(seg).__name__
+        if name in ('Arc', 'QuadraticBezier', 'CubicBezier'):
+            return True
+    return False
+
+
+def _path_is_straight_horizontal(path) -> bool:
+    """True if path is only Line segments and all points share the same y."""
+    if _path_has_curvature(path):
+        return False
+    ys: List[float] = []
+    for seg in path:
+        if hasattr(seg, 'start'):
+            ys.append(seg.start.imag)
+        if hasattr(seg, 'end'):
+            ys.append(seg.end.imag)
+    if not ys:
+        return False
+    y0 = ys[0]
+    return all(abs(y - y0) < 1e-6 for y in ys)
+
+
+def _path_intersects_centerline(path, centerline_y: float) -> bool:
+    """True if path bbox spans the horizontal centerline (optical axis)."""
+    try:
+        bbox = path.bbox()
+        if bbox is None:
+            return True  # Unknown bbox, allow
+        # bbox is (xmin, xmax, ymin, ymax)
+        ymin, ymax = float(bbox[2]), float(bbox[3])
+        return ymin <= centerline_y <= ymax
+    except Exception:
+        return True
+
+
+def _path_should_ignore_style(attrs: Dict[str, Any]) -> bool:
+    """True if path has dashed stroke or very thin stroke (annotation style)."""
+    if not attrs:
+        return False
+    # stroke-dasharray indicates dashed line (dimension, axis)
+    for key in ('stroke-dasharray', 'stroke_dasharray'):
+        if attrs.get(key):
+            return True
+    # stroke in style attribute
+    style = attrs.get('style', '') or ''
+    if 'stroke-dasharray' in style.lower():
+        return True
+    # stroke-width: thin lines are often annotations
+    for key in ('stroke-width', 'stroke_width'):
+        v = attrs.get(key)
+        if v is not None:
+            try:
+                w = float(re.sub(r'[^\d.]', '', str(v)) or 0)
+                if 0 < w < _MIN_STROKE_WIDTH:
+                    return True
+            except ValueError:
+                pass
+    # stroke-width in style
+    sw = re.search(r'stroke-width\s*:\s*([^;]+)', style, re.IGNORECASE)
+    if sw:
+        try:
+            w = float(re.sub(r'[^\d.]', '', sw.group(1)) or 0)
+            if 0 < w < _MIN_STROKE_WIDTH:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def _deduplicate_path_infos(
+    indexed: List[Tuple[int, Tuple[Optional[float], float, float]]],
+    tolerance: float = _DEDUP_TOLERANCE,
+) -> List[Tuple[int, Tuple[Optional[float], float, float]]]:
+    """
+    Remove paths that are nearly identical (center_x and extent within tolerance).
+    When duplicates exist, prefer the one with curvature (radius) over flat.
+    """
+    if len(indexed) <= 1:
+        return indexed
+    result: List[Tuple[int, Tuple[Optional[float], float, float]]] = []
+    for idx, (radius, center_x, diameter) in indexed:
+        found_dup = False
+        for j, (_, (r2, cx2, d2)) in enumerate(result):
+            if (abs(center_x - cx2) < tolerance and
+                    abs(diameter - d2) < tolerance and
+                    (radius is None or r2 is None or abs((radius or 0) - (r2 or 0)) < tolerance)):
+                # Prefer path with curvature (radius) over flat
+                if radius is not None and r2 is None:
+                    result[j] = (idx, (radius, center_x, diameter))
+                found_dup = True
+                break
+        if not found_dup:
+            result.append((idx, (radius, center_x, diameter)))
+    return result
+
+
 def import_from_svg(content: bytes) -> List[Dict[str, Any]]:
     """
     Parse SVG lens cross-section using svgpathtools.
     Extracts curvatures from arcs and thicknesses from distances between paths.
-    Assumes: x = optical axis, y = aperture; paths ordered left-to-right.
+    Filters out annotations (arrows, text, axes) by length, axis intersection,
+    shape heuristics, and style. Deduplicates near-identical paths.
     """
     try:
         from svgpathtools import svgstr2paths
@@ -229,22 +417,81 @@ def import_from_svg(content: bytes) -> List[Dict[str, Any]]:
         ) from e
 
     svg_str = content.decode("utf-8", errors="replace")
+    svg_str = _sanitize_svg_for_parsing(svg_str)
     try:
-        paths, _ = svgstr2paths(svg_str)
+        paths, path_attrs = svgstr2paths(svg_str)
     except Exception as e:
         raise ValueError(f"Failed to parse SVG paths: {e}") from e
 
     if not paths:
         raise ValueError("No paths found in SVG.")
 
-    # Extract (radius, center_x, diameter) for each path
+    # Get viewport for centerline (optical axis)
+    vp_w, vp_h = _get_viewport_from_svg(svg_str)
+    centerline_y = vp_h / 2.0
+
+    # Ensure path_attrs aligns with paths (svgstr2paths may convert circles/etc to paths)
+    attrs_list = path_attrs if len(path_attrs) >= len(paths) else [{}] * len(paths)
+
+    # First pass: length filter; compute centerline from curvature paths only (lens surfaces)
+    length_ok_paths: List[Tuple[int, Any, Dict[str, Any]]] = []
+    ymin_curv, ymax_curv = float('inf'), float('-inf')
+    for i, path in enumerate(paths):
+        attrs = attrs_list[i] if i < len(attrs_list) else {}
+        try:
+            plen = path.length()
+        except Exception:
+            plen = 0.0
+        if plen < _MIN_PATH_LENGTH:
+            continue
+        if _path_has_curvature(path) and not _path_should_ignore_style(attrs):
+            try:
+                bbox = path.bbox()
+                if bbox:
+                    ymin_curv = min(ymin_curv, float(bbox[2]))
+                    ymax_curv = max(ymax_curv, float(bbox[3]))
+            except Exception:
+                pass
+        length_ok_paths.append((i, path, attrs))
+
+    # Use centerline from curvature paths (lens) if any; else viewport center
+    if ymin_curv <= ymax_curv:
+        centerline_y = (ymin_curv + ymax_curv) / 2.0
+
+    # Filter: axis intersection, shape, style
+    filtered_paths: List[Any] = []
+    for i, path, attrs in length_ok_paths:
+        # Filter by axis intersection: must cross horizontal centerline
+        if not _path_intersects_centerline(path, centerline_y):
+            continue
+
+        # Shape heuristic: ignore perfectly straight horizontal lines (dimension/axis)
+        if _path_is_straight_horizontal(path):
+            continue
+
+        # Style filter: ignore dashed or very thin stroke
+        if _path_should_ignore_style(attrs):
+            continue
+
+        filtered_paths.append(path)
+
+    # Extract infos from filtered paths
     infos: List[Tuple[Optional[float], float, float]] = []
-    for path in paths:
+    for path in filtered_paths:
         r, cx, d = _extract_surface_info_from_path(path)
         infos.append((r, cx, d))
 
-    # Sort by center_x (optical axis position, left to right)
+    # Deduplication: remove nearly identical paths
     indexed = list(enumerate(infos))
+    indexed = _deduplicate_path_infos(indexed)
+
+    if not indexed:
+        raise ValueError(
+            "No lens surfaces found after filtering annotations. "
+            "Ensure lens paths cross the drawing centerline and have length ≥ 5 units."
+        )
+
+    # Sort by center_x (optical axis position, left to right)
     indexed.sort(key=lambda x: x[1][1])
 
     surfaces: List[Dict[str, Any]] = []

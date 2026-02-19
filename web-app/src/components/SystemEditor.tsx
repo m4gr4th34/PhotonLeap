@@ -336,6 +336,28 @@ export function SystemEditor({
     })
   }
 
+  /** Heuristic: surface looks like text/arrow annotation (small diameter, thin line, or description match) */
+  const looksLikeAnnotation = (s: Surface): boolean => {
+    const desc = (s.description || '').toLowerCase()
+    const annotationPattern = /arrow|text|dimension|label|annot|axis|tick|mark/
+    if (annotationPattern.test(desc)) return true
+    if (s.diameter < 2.5) return true
+    if (s.radius === 0 && s.thickness < 0.5) return true
+    return false
+  }
+
+  const clearAllAnnotations = () => {
+    if (!importPreview) return
+    const toIgnore = importPreview.surfaces
+      .filter(looksLikeAnnotation)
+      .map((s) => s.id)
+    setIgnoredImportIds((prev) => {
+      const next = new Set(prev)
+      toIgnore.forEach((id) => next.add(id))
+      return next
+    })
+  }
+
   const confirmImport = () => {
     if (!importPreview) return
     const toAdd = importPreview.surfaces.filter((s) => !ignoredImportIds.has(s.id))
@@ -760,13 +782,22 @@ export function SystemEditor({
               </div>
               <div className="flex-1 overflow-auto p-4">
                 <p className="text-sm text-slate-400 mb-3">
-                  {importPreview.surfaces.length} surface{importPreview.surfaces.length !== 1 ? 's' : ''} found. Check &quot;Ignore&quot; to exclude from import.
+                  {importPreview.surfaces.length} surface{importPreview.surfaces.length !== 1 ? 's' : ''} found. Click a row to toggle import. Green = included, gray = ignored.
                 </p>
+                <div className="flex gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={clearAllAnnotations}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-slate-600"
+                  >
+                    Clear All Annotations
+                  </button>
+                </div>
                 <div className="overflow-x-auto rounded-lg border border-slate-700">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-800/80 text-left text-slate-400">
-                        <th className="py-2 px-3 w-12">Ignore</th>
+                        <th className="py-2 px-3 w-12">Import</th>
                         <th className="py-2 px-3 w-10">#</th>
                         <th className="py-2 px-3">Radius (mm)</th>
                         <th className="py-2 px-3">Material</th>
@@ -774,32 +805,48 @@ export function SystemEditor({
                       </tr>
                     </thead>
                     <tbody>
-                      {importPreview.surfaces.map((s, i) => (
-                        <tr
-                          key={s.id}
-                          className={`border-t border-slate-700/80 ${
-                            ignoredImportIds.has(s.id) ? 'opacity-50 bg-slate-800/40' : ''
-                          }`}
-                        >
-                          <td className="py-2 px-3">
-                            <input
-                              type="checkbox"
-                              checked={ignoredImportIds.has(s.id)}
-                              onChange={() => toggleImportIgnore(s.id)}
-                              className="rounded border-slate-600 bg-slate-800 text-cyan-electric focus:ring-cyan-electric/50"
-                              aria-label={`Ignore surface ${i + 1}`}
-                            />
-                          </td>
-                          <td className="py-2 px-3 text-slate-400">{i + 1}</td>
-                          <td className="py-2 px-3 text-slate-200 font-mono">
-                            {s.radius === 0 ? '∞' : s.radius.toFixed(2)}
-                          </td>
-                          <td className="py-2 px-3 text-slate-200">{s.material}</td>
-                          <td className="py-2 px-3 text-slate-200 font-mono">
-                            {s.thickness.toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
+                      {importPreview.surfaces.map((s, i) => {
+                        const isIgnored = ignoredImportIds.has(s.id)
+                        return (
+                          <tr
+                            key={s.id}
+                            onClick={() => toggleImportIgnore(s.id)}
+                            className={`border-t border-slate-700/80 cursor-pointer transition-colors ${
+                              isIgnored
+                                ? 'opacity-50 bg-slate-800/40 hover:bg-slate-800/60'
+                                : 'bg-emerald-500/10 hover:bg-emerald-500/10 border-l-2 border-l-emerald-500'
+                            }`}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                toggleImportIgnore(s.id)
+                              }
+                            }}
+                            aria-label={`Surface ${i + 1}: ${isIgnored ? 'ignored' : 'included'}, click to toggle`}
+                          >
+                            <td className="py-2 px-3">
+                              <input
+                                type="checkbox"
+                                checked={!isIgnored}
+                                onChange={() => toggleImportIgnore(s.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="rounded border-slate-600 bg-slate-800 text-cyan-electric focus:ring-cyan-electric/50"
+                                aria-label={`Include surface ${i + 1}`}
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{i + 1}</td>
+                            <td className="py-2 px-3 text-slate-200 font-mono">
+                              {s.radius === 0 ? '∞' : s.radius.toFixed(2)}
+                            </td>
+                            <td className="py-2 px-3 text-slate-200">{s.material}</td>
+                            <td className="py-2 px-3 text-slate-200 font-mono">
+                              {s.thickness.toFixed(2)}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
