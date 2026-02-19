@@ -35,7 +35,7 @@ app.add_middleware(
 
 
 class SurfaceSchema(BaseModel):
-    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances, coating)."""
+    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances, coating, sellmeierCoefficients, surfaceQuality)."""
     id: str
     type: str
     radius: float
@@ -48,6 +48,8 @@ class SurfaceSchema(BaseModel):
     thicknessTolerance: Optional[float] = None
     tiltTolerance: Optional[float] = None
     coating: Optional[str] = None
+    sellmeierCoefficients: Optional[Dict[str, Any]] = None
+    surfaceQuality: Optional[str] = None
 
 
 class CoatingItem(BaseModel):
@@ -191,6 +193,33 @@ def monte_carlo(req: OpticalStackRequest):
     optical_stack = req.model_dump()
     iterations = optical_stack.pop("iterations", None) or 100
     return run_monte_carlo(optical_stack, iterations=iterations)
+
+
+class LensXExportRequest(BaseModel):
+    """Request body for LENS-X export."""
+    surfaces: List[SurfaceSchema]
+    projectName: Optional[str] = "Untitled"
+    date: Optional[str] = None
+    drawnBy: Optional[str] = "MacOptics"
+    entrancePupilDiameter: float = 10
+
+
+@app.post("/api/export/lens-x")
+def export_lens_x(req: LensXExportRequest):
+    """
+    Generate valid LENS-X JSON from optical stack.
+    Every surface exports radius, thickness, material, and coating.
+    """
+    from lens_x_export import to_lens_x
+    from datetime import date
+    surfaces = [s.model_dump() for s in req.surfaces]
+    return to_lens_x(
+        surfaces,
+        project_name=req.projectName or "Untitled",
+        date_str=req.date or str(date.today()),
+        drawn_by=req.drawnBy or "MacOptics",
+        entrance_pupil_diameter=req.entrancePupilDiameter,
+    )
 
 
 @app.post("/api/import/lens-system")

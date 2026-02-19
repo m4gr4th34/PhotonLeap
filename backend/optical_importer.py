@@ -43,6 +43,7 @@ def _surface_from_dict(
     Map a raw surface dict to our Surface model.
     Supports flexible keys: Radius/radius, Thickness/thickness, Material/material,
     Diameter/diameter, Type/type, etc.
+    Prioritizes LENS-X-style physics (sellmeier, coating) when present.
     """
     def get_float(d: Dict, *keys: str, default: float = 0.0) -> float:
         for k in keys:
@@ -96,7 +97,7 @@ def _surface_from_dict(
             else 1.52
         )
 
-    return {
+    result: Dict[str, Any] = {
         "id": str(uuid.uuid4()),
         "type": surf_type,
         "radius": radius,
@@ -106,6 +107,30 @@ def _surface_from_dict(
         "material": material,
         "description": get_str(raw, "Comment", "comment", "description") or f"Surface {idx + 1}",
     }
+    # LENS-X-style physics: load sellmeier and coating directly when present
+    physics = raw.get("physics")
+    if isinstance(physics, dict):
+        sellmeier = physics.get("sellmeier")
+        if sellmeier and isinstance(sellmeier, dict):
+            from glass_materials import n_from_sellmeier
+            B = sellmeier.get("B", [0, 0, 0])
+            C = sellmeier.get("C", [1, 1, 1])
+            result["refractiveIndex"] = n_from_sellmeier(_DEFAULT_WVL_NM, {"B": B, "C": C})
+            result["sellmeierCoefficients"] = sellmeier
+        coating = physics.get("coating")
+        if coating and isinstance(coating, str):
+            result["coating"] = str(coating).strip()
+    mfg = raw.get("manufacturing")
+    if isinstance(mfg, dict):
+        if mfg.get("surface_quality"):
+            result["surfaceQuality"] = str(mfg["surface_quality"])
+        if mfg.get("radius_tolerance") is not None:
+            result["radiusTolerance"] = float(mfg["radius_tolerance"])
+        if mfg.get("thickness_tolerance") is not None:
+            result["thicknessTolerance"] = float(mfg["thickness_tolerance"])
+        if mfg.get("tilt_tolerance") is not None:
+            result["tiltTolerance"] = float(mfg["tilt_tolerance"])
+    return result
 
 
 def _parse_json_surfaces(data: Any) -> List[Dict[str, Any]]:
