@@ -3,30 +3,11 @@
     <img src="assets/banner.png" alt="MacOptics" width="100%" style="max-width: 100%;" />
   </a>
   <br /><br />
-  <a href="http://localhost:5173" class="live-demo-btn">Live Demo</a>
+  <a href="http://localhost:5173" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 8px; padding: 12px 24px; margin: 20px 0;">
+    🚀 View Live Demo
+  </a>
   <br /><br /><br />
 </div>
-
-<br />
-
-<style>
-  .live-demo-btn {
-    display: inline-block;
-    background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
-    color: white;
-    font-weight: bold;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    text-decoration: none;
-    border-radius: 8px;
-    padding: 12px 24px;
-    margin-top: 12px;
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
-  }
-  .live-demo-btn:hover {
-    box-shadow: 0 4px 12px rgba(34, 211, 238, 0.4);
-    transform: translateY(-2px);
-  }
-</style>
 
 <br /><br />
 
