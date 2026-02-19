@@ -246,6 +246,11 @@ export function InfoPanel({ highlightedMetric, onHighlightMetric }: InfoPanelPro
                       scan metrics help you locate the beam waist, minimize spot size, and control
                       divergence.
                     </p>
+                    <p>
+                      The HUD now displays Beam Waist (w₀) and Rayleigh Range (z<sub>R</sub>). For
+                      laser design, ensure your M² factor is set in System Properties to simulate
+                      real-world beam quality.
+                    </p>
                     <div className="space-y-2">
                       {GLOSSARY_ITEMS.map((item) => (
                         <GlossaryCard
@@ -261,6 +266,13 @@ export function InfoPanel({ highlightedMetric, onHighlightMetric }: InfoPanelPro
                       <strong className="text-slate-300">Tip:</strong> Minimize RMS at the image
                       plane to reduce blur; use the scan line to find where beam width is smallest.
                     </p>
+                    <div className="rounded-lg border border-cyan-electric/50 bg-cyan-electric/5 px-3 py-2.5">
+                      <p className="text-xs font-medium text-cyan-electric/90 mb-0.5">Pro-Tip</p>
+                      <p className="text-slate-400 text-sm leading-relaxed">
+                        Note: The Gold Diamond indicates the point of minimum beam waist, which may
+                        shift based on lens dispersion.
+                      </p>
+                    </div>
                   </div>
                 )}
                 {id === 'ultrafast' && (
