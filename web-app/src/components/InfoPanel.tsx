@@ -7,7 +7,11 @@ import {
   ScanLine,
   ChevronDown,
 } from 'lucide-react'
+import { isMac } from '../config'
 import type { HighlightedMetric } from '../types/ui'
+
+const kbdClass =
+  'px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-200 font-mono text-[10px] shadow-[0_1px_0_0_rgba(255,255,255,0.1),inset_0_-1px_0_0_rgba(0,0,0,0.3)]'
 
 const SECTIONS = [
   {
@@ -192,12 +196,27 @@ export function InfoPanel({ highlightedMetric, onHighlightMetric }: InfoPanelPro
                   <div className="space-y-4">
                     <div>
                       <h4 className="text-slate-300 font-medium text-xs uppercase tracking-wider mb-2">
-                        Viewport
+                        Keyboard shortcuts
                       </h4>
-                      <ul className="space-y-1.5 text-slate-400">
-                        <li>• <strong className="text-slate-300">Pan</strong> — click and drag</li>
-                        <li>• <strong className="text-slate-300">Zoom</strong> — scroll or pinch</li>
-                        <li>• <strong className="text-slate-300">Reset view</strong> — double‑click</li>
+                      <ul className="space-y-2 text-slate-400">
+                        <li className="flex items-center gap-2">
+                          <kbd className={kbdClass}>Space</kbd>
+                          <span>+</span>
+                          <kbd className={kbdClass}>Drag</kbd>
+                          <span className="text-slate-500">— Pan viewport</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <kbd className={kbdClass}>Scroll</kbd>
+                          <span className="text-slate-500">— Zoom in/out</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <kbd className={kbdClass}>Double Click</kbd>
+                          <span className="text-slate-500">— Reset view</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <kbd className={kbdClass}>{isMac ? '⌥ Option' : 'Alt'}</kbd>
+                          <span className="text-slate-500">— Override Snap-to-Focus</span>
+                        </li>
                       </ul>
                     </div>
                     <div>
