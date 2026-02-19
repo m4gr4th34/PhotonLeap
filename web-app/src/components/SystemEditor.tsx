@@ -381,7 +381,7 @@ function CoatingCombobox({
         className="w-full text-left px-2 py-1.5 text-sm hover:bg-cyan-electric/20 text-slate-200 rounded flex items-center gap-2"
       >
         <span
-          className="shrink-0 w-3 h-3 rounded-sm border border-white/20"
+          className="shrink-0 w-3 h-3 rounded-full border border-white/20"
           style={getCoatingSwatchStyle(c.name)}
           title={c.description}
         />
@@ -516,7 +516,7 @@ function CoatingCombobox({
         </button>
       </div>
       <span
-        className="shrink-0 w-3 h-3 rounded-sm border border-white/20"
+        className="shrink-0 w-3 h-3 rounded-full border border-white/20"
         style={getCoatingSwatchStyle(displayValue)}
         title={coatings.find((c) => c.name === displayValue)?.description}
       />

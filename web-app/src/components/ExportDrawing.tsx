@@ -145,7 +145,7 @@ export function ExportDrawing({
       <section className="glass-card p-4">
         <h3 className="text-sm font-medium text-slate-300 mb-3">Export Drawing</h3>
         <p className="text-xs text-slate-500 mb-4">
-          Technical blueprint with cross-section, dimensions, data table (S/D, Material, CT), and title block.
+          Technical blueprint with cross-section, dimensions, data table (S/D, Material, CT), and title block. LENS-X JSON includes radius, thickness, material, coating per surface; flat surfaces export radius as &quot;infinity&quot;.
         </p>
         <div className="flex flex-wrap gap-3">
           <button

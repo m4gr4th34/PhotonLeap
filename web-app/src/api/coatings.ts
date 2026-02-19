@@ -12,15 +12,15 @@ export type CoatingOption = {
 
 const API_BASE = config.apiBaseUrl
 
-/** Swatch color/gradient for coating visual indicator */
+/** Swatch color for coating visual indicator (CSS circle, gold for Gold, light blue for AR) */
 export function getCoatingSwatchStyle(name: string): { background: string } {
   const m: Record<string, { background: string }> = {
     Uncoated: { background: '#94a3b8' },
     None: { background: '#94a3b8' },
-    MgF2: { background: 'linear-gradient(135deg, #a78bfa 0%, #818cf8 100%)' },
-    BBAR: { background: 'linear-gradient(135deg, #c4b5fd 0%, #93c5fd 100%)' },
-    'V-Coat 532': { background: 'linear-gradient(135deg, #a5b4fc 0%, #7dd3fc 100%)' },
-    'V-Coat 1064': { background: 'linear-gradient(135deg, #818cf8 0%, #67e8f9 100%)' },
+    MgF2: { background: '#7dd3fc' },
+    BBAR: { background: '#93c5fd' },
+    'V-Coat 532': { background: '#a5b4fc' },
+    'V-Coat 1064': { background: '#67e8f9' },
     'Protected Silver': { background: 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 50%, #94a3b8 100%)' },
     'Protected Gold': { background: 'linear-gradient(135deg, #fcd34d 0%, #f59e0b 50%, #d97706 100%)' },
     'Protected Aluminum': { background: 'linear-gradient(135deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%)' },

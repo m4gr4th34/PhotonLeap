@@ -9,7 +9,8 @@ export { getISOString } from './iso10110'
 
 /** LENS-X surface with physics and manufacturing data */
 export interface LensXSurface {
-  radius: number
+  /** Radius (mm) or "infinity" for plano */
+  radius: number | 'infinity'
   thickness: number
   aperture: number
   material: string
@@ -74,8 +75,10 @@ export function toLensX(
     if (s.refractiveIndex != null) physics.refractive_index = s.refractiveIndex
     if (s.sellmeierCoefficients) physics.sellmeier = s.sellmeierCoefficients
     if (s.coating) physics.coating = s.coating
+    const r = s.radius ?? 0
+    const isFlat = r === 0 || (typeof r === 'number' && Math.abs(r) < 0.01)
     return {
-      radius: s.radius ?? 0,
+      radius: isFlat ? 'infinity' : r,
       thickness: s.thickness ?? 0,
       aperture: (s.diameter ?? 25) / 2,
       material: s.material ?? (s.type === 'Air' ? 'Air' : 'N-BK7'),

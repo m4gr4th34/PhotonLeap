@@ -12,8 +12,12 @@ def _surface_to_lens_x(s: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map internal Surface to LENS-X surface.
     Crucially: always include radius, thickness, material, coating.
+    Flat surfaces (radius 0) export radius as "infinity".
     """
-    radius = float(s.get("radius") if s.get("radius") is not None else 0)
+    r_raw = s.get("radius")
+    radius_val = float(r_raw) if r_raw is not None else 0.0
+    is_flat = radius_val == 0 or abs(radius_val) < 0.01
+    radius: Any = "infinity" if is_flat else radius_val
     thickness = float(s.get("thickness") if s.get("thickness") is not None else 0)
     diameter = float(s.get("diameter") if s.get("diameter") is not None else 25)
     aperture = diameter / 2.0
