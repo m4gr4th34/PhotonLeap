@@ -35,7 +35,7 @@ app.add_middleware(
 
 
 class SurfaceSchema(BaseModel):
-    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances)."""
+    """Surface shape matching frontend (shared keys: id, radius, thickness, material, refractiveIndex, diameter, type, description, tolerances, coating)."""
     id: str
     type: str
     radius: float
@@ -47,6 +47,32 @@ class SurfaceSchema(BaseModel):
     radiusTolerance: Optional[float] = None
     thicknessTolerance: Optional[float] = None
     tiltTolerance: Optional[float] = None
+    coating: Optional[str] = None
+
+
+class CoatingItem(BaseModel):
+    """Coating for dropdown."""
+    name: str
+    description: str
+    is_hr: bool
+
+
+@app.get("/api/coatings", response_model=List[CoatingItem])
+def get_coatings():
+    """
+    Return the coating library for the optical design system.
+    Used for surface coating dropdown (MgF₂, BBAR, V-Coat, mirrors, HR).
+    """
+    from coating_engine import get_all_coatings
+    coatings = get_all_coatings()
+    return [
+        CoatingItem(
+            name=c.get("name", ""),
+            description=c.get("description", ""),
+            is_hr=c.get("is_hr", False),
+        )
+        for c in coatings
+    ]
 
 
 class GlassMaterial(BaseModel):

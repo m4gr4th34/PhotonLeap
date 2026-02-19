@@ -6,6 +6,7 @@ import { ChevronDown, GripVertical, Plus, Trash2, Search, FileUp, X } from 'luci
 import type { SystemState, Surface } from '../types/system'
 import { config } from '../config'
 import { fetchMaterials, nFromCoeffs, type MaterialOption } from '../api/materials'
+import { fetchCoatings, COATINGS_FALLBACK, type CoatingOption } from '../api/coatings'
 import { importLensSystem } from '../api/importLens'
 
 /** Fallback when API is unavailable */
@@ -279,6 +280,7 @@ export function SystemEditor({
   const surfaces = systemState.surfaces
   const highSensitivityIndices = getHighSensitivityIndices(sensitivityBySurface)
   const [glassMaterials, setGlassMaterials] = useState<MaterialOption[]>(GLASS_LIBRARY_FALLBACK)
+  const [coatings, setCoatings] = useState<CoatingOption[]>(COATINGS_FALLBACK)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [importPreview, setImportPreview] = useState<{
     surfaces: Surface[]
@@ -289,6 +291,9 @@ export function SystemEditor({
 
   useEffect(() => {
     fetchMaterials().then(setGlassMaterials)
+  }, [])
+  useEffect(() => {
+    fetchCoatings().then(setCoatings)
   }, [])
 
   useEffect(() => {
@@ -488,6 +493,7 @@ export function SystemEditor({
               <th className="py-2 pr-4">n</th>
               <th className="py-2 pr-4">Diameter (mm)</th>
               <th className="py-2 pr-4">Material</th>
+              <th className="py-2 pr-3" title="Coating (affects power loss)">Coating</th>
               <th className="py-2 pr-3" title="Radius ± (mm)">R ±</th>
               <th className="py-2 pr-3" title="Thickness ± (mm)">T ±</th>
               <th className="py-2 pr-3" title="Tilt ± (deg)">Tilt ±</th>
@@ -507,7 +513,7 @@ export function SystemEditor({
               onClick={addSurfaceAtStart}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={14} className="py-2">
+              <td colSpan={15} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at start
@@ -615,6 +621,25 @@ export function SystemEditor({
                     }
                     onClick={(e) => e.stopPropagation()}
                   />
+                </td>
+                <td className="py-2 pr-3">
+                  <select
+                    value={s.coating ?? 'None'}
+                    onChange={(e) =>
+                      updateSurface(s.id, {
+                        coating: e.target.value === 'None' ? undefined : e.target.value,
+                      })
+                    }
+                    onClick={(e) => e.stopPropagation()}
+                    className={inputClass}
+                    title="Coating: affects power loss R(λ)"
+                  >
+                    {coatings.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="py-2 pr-3">
                   <input
@@ -727,7 +752,7 @@ export function SystemEditor({
               onClick={() => addSurfaceAtIndex(surfaces.length)}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={14} className="py-2">
+              <td colSpan={15} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at end

@@ -19,6 +19,8 @@ export type Surface = {
   surfaceQuality?: string
   /** Sellmeier coefficients { B, C } from LENS-X import — used by trace when material not in library */
   sellmeierCoefficients?: { B: number[]; C: number[] }
+  /** Coating (e.g. MgF2, BBAR, V-Coat 532/1064, Protected Silver/Gold/Aluminum, HR) — affects power loss */
+  coating?: string
 }
 
 export type MetricsAtZ = {
@@ -44,6 +46,8 @@ export type TraceResult = {
   rays: number[][][]
   /** Per-ray field index for correct color mapping (backend provides this) */
   rayFieldIndices?: number[]
+  /** Transmitted power (0..1) at end of each ray — P_new = P_old × (1−R(λ)) per surface */
+  rayPower?: number[]
   surfaces: number[][][]
   focusZ: number
   bestFocusZ?: number

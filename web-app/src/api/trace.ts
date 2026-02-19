@@ -10,6 +10,7 @@ import { config } from '../config'
 export type TraceResponse = {
   rays?: number[][][]  // [[[z,y], ...], ...] per ray
   rayFieldIndices?: number[]  // field index per ray for correct color mapping
+  rayPower?: number[]  // transmitted power (0..1) at end of each ray
   surfaces?: number[][][]  // [[[z,y], ...], ...] per surface curve
   focusZ?: number
   bestFocusZ?: number
@@ -62,6 +63,7 @@ export async function traceOpticalStack(optical_stack: {
       diameter: s.diameter,
       material: s.material,
       description: s.description,
+      coating: s.coating,
     })),
   }
   const res = await fetch(`${API_BASE}/api/trace`, {
@@ -112,6 +114,7 @@ export async function runMonteCarlo(optical_stack: {
       radiusTolerance: s.radiusTolerance,
       thicknessTolerance: s.thicknessTolerance,
       tiltTolerance: s.tiltTolerance,
+      coating: s.coating,
     })),
   }
   const res = await fetch(`${API_BASE}/api/monte-carlo`, {

@@ -661,6 +661,7 @@ export function OpticalViewport({
           traceResult: {
             rays: res.rays ?? [],
             rayFieldIndices: res.rayFieldIndices,
+            rayPower: res.rayPower,
             surfaces: res.surfaces ?? [],
             focusZ: res.focusZ ?? 0,
             bestFocusZ: res.bestFocusZ,

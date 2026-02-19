@@ -318,15 +318,21 @@ def optical_stack_to_surf_data(surfaces, wvl_nm=587.6):
     If material name is in the glass library, n(λ) is computed from Sellmeier;
     otherwise uses refractiveIndex from the surface.
     Object space is assumed n=1 (air).
+    If surface has coating='HR', uses 'REFL' so rayoptics treats it as a mirror.
     """
-    from glass_materials import refractive_index_at_wavelength
-
-    from glass_materials import n_from_sellmeier
+    from coating_engine import is_hr_coating
+    from glass_materials import refractive_index_at_wavelength, n_from_sellmeier
 
     surf_data_list = []
     for s in surfaces:
         r = float(s.get("radius", 0) or 0)
         t = float(s.get("thickness", 0) or 0)
+        coating = s.get("coating") or ""
+        if is_hr_coating(coating):
+            curvature = 1.0 / r if r != 0 else 0.0
+            v = 0.0
+            surf_data_list.append([curvature, t, "REFL", v])
+            continue
         n_fallback = float(s.get("refractiveIndex", 1) or 1)
         material = s.get("material") or ""
         sellmeier = s.get("sellmeierCoefficients")
@@ -400,7 +406,7 @@ def run_trace(optical_stack: dict) -> dict:
 
     surfaces = optical_stack.get("surfaces", [])
     if not surfaces:
-        return {"error": "No surfaces provided", "rays": [], "surfaces": [], "focusZ": 0, "bestFocusZ": 0, "metricsSweep": []}
+        return {"error": "No surfaces provided", "rays": [], "rayPower": [], "surfaces": [], "focusZ": 0, "bestFocusZ": 0, "metricsSweep": []}
 
     epd = float(optical_stack.get("entrancePupilDiameter", 10) or 10)
     wvl_nm = float(optical_stack.get("wavelengths", [587.6])[0] or 587.6)
@@ -425,7 +431,7 @@ def run_trace(optical_stack: dict) -> dict:
             surface_diameters=surface_diameters,
         )
     except Exception as e:
-        return {"error": str(e), "rays": [], "surfaces": [], "focusZ": 0, "bestFocusZ": 0, "metricsSweep": []}
+        return {"error": str(e), "rays": [], "rayPower": [], "surfaces": [], "focusZ": 0, "bestFocusZ": 0, "metricsSweep": []}
 
     # Configure field of view from fieldAngles (degrees)
     osp = opt_model.optical_spec
@@ -472,6 +478,9 @@ def run_trace(optical_stack: dict) -> dict:
         gbl[:, 0] -= z_origin
         surface_curves.append([[float(p[0]), float(p[1])] for p in gbl])
 
+    # Power loss from coatings: R(λ) per surface, P_new = P_old × (1 - R)
+    from coating_engine import get_reflectivity, is_hr_coating
+
     # Ray polylines — trace each field separately for field-weighted focus
     grid_def = [np.array([-1.0, -1.0]), np.array([1.0, 1.0]), num_rays]
     pupil_coords = list(sampler.grid_ray_generator(grid_def))
@@ -479,6 +488,7 @@ def run_trace(optical_stack: dict) -> dict:
     rays_by_field = []
     rays = []
     ray_field_indices = []
+    ray_power = []  # transmitted power (0..1) at end of each ray
     for fld_idx, fld_obj in enumerate(osp.field_of_view.fields):
         ray_list = analyses.trace_ray_list(
             opt_model, pupil_coords, fld_obj, wvl_nm, foc=0.0, check_apertures=True
@@ -500,6 +510,20 @@ def run_trace(optical_stack: dict) -> dict:
                 field_rays.append(poly)
                 rays.append(poly)
                 ray_field_indices.append(fld_idx)
+                # Power: at each surface crossing
+                # Transmit: P_new = P_old × (1 - R). HR (reflect): P_new = P_old × R (we follow reflected ray)
+                p = 1.0
+                n_seg = len(ray)
+                for seg_idx in range(1, n_seg):
+                    surf_idx = seg_idx - 1
+                    if surf_idx < len(surfaces):
+                        coating = surfaces[surf_idx].get("coating") or ""
+                        r = get_reflectivity(coating, wvl_nm)
+                        if is_hr_coating(coating):
+                            p *= r  # reflected ray carries R fraction
+                        else:
+                            p *= 1.0 - r  # transmitted ray
+                ray_power.append(float(p))
         rays_by_field.append(field_rays)
 
     # Performance
@@ -547,6 +571,7 @@ def run_trace(optical_stack: dict) -> dict:
     result = {
         "rays": rays,
         "rayFieldIndices": ray_field_indices,
+        "rayPower": ray_power,
         "surfaces": surface_curves,
         "focusZ": float(focus_z),
         "bestFocusZ": best_focus_z,
