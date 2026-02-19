@@ -679,10 +679,6 @@ export function OpticalViewport({
     return generateRays(numRays, lensX1, lensX2, focusX, semiHeight)
   }, [hasTraced, traceResult, numRays, lensX1, lensX2, focusX, semiHeight, systemState.fieldAngles])
 
-  const focusSvgX = traceResult?.focusZ != null
-    ? traceResult.focusZ * scale + xOffset
-    : focusX * scale + xOffset
-
   const bestFocusZ = traceResult?.bestFocusZ
   const bestFocusSvgX = bestFocusZ != null ? bestFocusZ * scale + xOffset : null
 
@@ -1169,19 +1165,6 @@ export function OpticalViewport({
               />
             )
           })}
-
-          {hasTraced && rays.length > 0 && (
-            <motion.circle
-              cx={focusSvgX}
-              cy={cy}
-              r="4"
-              fill="#22D3EE"
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.3, delay: 0.5 }}
-              filter="url(#glow-strong)"
-            />
-          )}
 
           <AnimatePresence>
             {showBestFocus && bestFocusSvgX != null && hasTraced && rays.length > 0 && (
