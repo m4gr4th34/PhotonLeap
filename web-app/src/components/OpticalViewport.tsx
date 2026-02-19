@@ -603,7 +603,13 @@ export function OpticalViewport({
         }))
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Trace failed'
+      const raw = err instanceof Error ? err.message : 'Trace failed'
+      const isNetwork =
+        /fetch|network|connection|cors|failed to fetch/i.test(raw) ||
+        raw === 'Trace failed'
+      const msg = isNetwork
+        ? `Cannot reach trace API. Is the backend running? Start it with: uvicorn backend.main:app --reload --port 8000`
+        : raw
       onSystemStateChange((prev) => ({
         ...prev,
         hasTraced: true,
@@ -760,6 +766,16 @@ export function OpticalViewport({
     }
     return elements
   }, [surfaces, zPositions, epd, scale, xOffset, cy])
+
+  /** Thermal heat map: show when power exceeds threshold and first lens has absorption */
+  const thermalHeatMapElement = useMemo(() => {
+    const threshold = config.thermalPowerThresholdW ?? 1
+    const power = systemState.laserPowerW ?? 0
+    const firstGlass = surfaces.find((s) => s.type === 'Glass')
+    const alpha = firstGlass?.absorptionCoefficient ?? 0
+    if (power <= threshold || alpha <= 0) return null
+    return lensElements.find((e) => e.type === 'glass' && e.key === 'gap-0') ?? null
+  }, [systemState.laserPowerW, surfaces, lensElements])
 
   // Rays grouped by field angle for robust color inheritance. Each group gets one stroke color.
   const raysByField = useMemo(() => {
@@ -1112,8 +1128,16 @@ export function OpticalViewport({
       </div>
 
       {traceError && (
-        <div className="absolute top-4 right-4 z-10 glass-card px-4 py-2 rounded-lg text-red-400 text-sm max-w-xs">
-          {traceError}
+        <div className="absolute top-4 right-4 z-20 glass-card px-4 py-3 rounded-lg text-red-400 text-sm max-w-sm border border-red-500/30 bg-slate-900/95">
+          <p className="font-medium text-red-300 mb-1">Trace error</p>
+          <p className="text-red-200/90">{traceError}</p>
+          <button
+            type="button"
+            onClick={() => onSystemStateChange((prev) => ({ ...prev, traceError: null }))}
+            className="mt-2 text-xs text-slate-400 hover:text-slate-200 underline"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -1265,6 +1289,19 @@ export function OpticalViewport({
                   <stop offset="50%" stopColor="#22D3EE" stopOpacity="0.18" />
                   <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.08" />
                 </linearGradient>
+                {/* Thermal heat map: center hot (orange/red), edges cool — for high-power CW laser lens warping */}
+                <radialGradient
+                  id="thermal-heat-map"
+                  cx="50%"
+                  cy="50%"
+                  r="50%"
+                  gradientUnits="objectBoundingBox"
+                >
+                  <stop offset="0%" stopColor="#f97316" stopOpacity="0.9" />
+                  <stop offset="40%" stopColor="#ea580c" stopOpacity="0.5" />
+                  <stop offset="70%" stopColor="#dc2626" stopOpacity="0.2" />
+                  <stop offset="100%" stopColor="#7f1d1d" stopOpacity="0" />
+                </radialGradient>
               </defs>
 
               <rect
@@ -1359,6 +1396,16 @@ export function OpticalViewport({
               )
             })}
           </g>
+
+          {thermalHeatMapElement && (
+            <path
+              d={thermalHeatMapElement.path}
+              fill="url(#thermal-heat-map)"
+              stroke="none"
+              opacity={0.6}
+              pointerEvents="none"
+            />
+          )}
 
           {raysByField
             .map((group, origIdx) => ({ group, origIdx }))

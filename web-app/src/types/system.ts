@@ -13,6 +13,10 @@ export type Surface = {
   thicknessTolerance?: number
   /** Tolerance ± (degrees) for Tilt — Monte Carlo jitter */
   tiltTolerance?: number
+  /** Absorption coefficient (1/cm) for thermal lensing — Glass surfaces only */
+  absorptionCoefficient?: number
+  /** ISO 10110 surface quality (scratch/dig), e.g. "3/2" */
+  surfaceQuality?: string
 }
 
 export type MetricsAtZ = {
@@ -71,6 +75,10 @@ export type SystemState = {
   traceError: string | null
   /** Set when surfaces are reordered; triggers trace on next Lens/Info tab view */
   pendingTrace?: boolean
+  /** Laser power (W) for thermal lensing — CW high-power */
+  laserPowerW?: number
+  /** Project name for ISO 10110 export */
+  projectName?: string
 }
 
 /** Compute performance metrics from system state (prefer trace result when available) */

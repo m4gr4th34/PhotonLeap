@@ -3,6 +3,7 @@ import { NavBar, type NavTab } from './components/NavBar'
 import { Canvas } from './components/Canvas'
 import { SystemEditor } from './components/SystemEditor'
 import { InfoPanel } from './components/InfoPanel'
+import { ExportDrawing } from './components/ExportDrawing'
 import { SystemProperties } from './components/SystemProperties'
 import {
   DEFAULT_SYSTEM_STATE,
@@ -29,6 +30,8 @@ function normalizeSurface(s: Partial<Surface> & { n?: number }, _i: number): Sur
     radiusTolerance: s.radiusTolerance != null ? Number(s.radiusTolerance) : undefined,
     thicknessTolerance: s.thicknessTolerance != null ? Number(s.thicknessTolerance) : undefined,
     tiltTolerance: s.tiltTolerance != null ? Number(s.tiltTolerance) : undefined,
+    absorptionCoefficient: s.absorptionCoefficient != null ? Number(s.absorptionCoefficient) : undefined,
+    surfaceQuality: s.surfaceQuality != null ? String(s.surfaceQuality) : undefined,
   }
 }
 
@@ -52,6 +55,8 @@ function loadLastDesign(): SystemState | null {
       focusMode: optical_stack.focusMode === 'Balanced' ? 'Balanced' : 'On-Axis',
       m2Factor: Math.max(0.1, Math.min(10, Number(optical_stack.m2Factor) || 1)),
       pulseWidthFs: Math.max(5, Math.min(10000, Number(optical_stack.pulseWidthFs) || 100)),
+      laserPowerW: optical_stack.laserPowerW != null ? Number(optical_stack.laserPowerW) : undefined,
+      projectName: typeof optical_stack.projectName === 'string' ? optical_stack.projectName : undefined,
       hasTraced: false,
       traceResult: null,
       traceError: null,
@@ -87,6 +92,8 @@ function App() {
       focusMode: systemState.focusMode ?? 'On-Axis',
       m2Factor: systemState.m2Factor ?? 1.0,
       pulseWidthFs: systemState.pulseWidthFs ?? 100,
+      laserPowerW: systemState.laserPowerW,
+      projectName: systemState.projectName,
       totalLength: systemState.totalLength,
       fNumber: systemState.fNumber,
       rmsSpotRadius: systemState.rmsSpotRadius,
@@ -161,9 +168,10 @@ function App() {
             </div>
           )}
           {activeTab === 'export' && (
-            <div className="h-full flex items-center justify-center text-slate-400">
-              Export view — coming soon
-            </div>
+            <ExportDrawing
+              systemState={systemState}
+              onSystemStateChange={onSystemStateChange}
+            />
           )}
         </main>
         <aside className="w-80 shrink-0 overflow-auto">

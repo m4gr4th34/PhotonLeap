@@ -61,4 +61,7 @@ export const config = {
 
   /** Toast duration (ms) */
   toastDuration: 2500,
+
+  /** Thermal lensing: power threshold (W) above which heat map overlay is shown */
+  thermalPowerThresholdW: 1,
 } as const

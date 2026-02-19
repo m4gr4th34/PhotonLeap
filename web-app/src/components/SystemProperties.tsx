@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { Plus, Trash2, Magnet } from 'lucide-react'
 import type { SystemState } from '../types/system'
 import { config, isMac } from '../config'
+import { computeThermalLensing } from '../lib/thermal_lensing'
 
 type SystemPropertiesProps = {
   systemState: SystemState
@@ -326,6 +327,67 @@ export function SystemProperties({
               />
             </span>
           </label>
+        </section>
+
+        {/* Thermal Lensing (high-power CW lasers) */}
+        <section className="glass-card p-4 border-orange-500/20">
+          <h3 className="text-sm font-medium text-slate-300 mb-3">Thermal Lensing</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Laser Power (W)</label>
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={1}
+                value={systemState.laserPowerW ?? ''}
+                onChange={(e) =>
+                  onSystemStateChange((prev) => ({
+                    ...prev,
+                    laserPowerW: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                placeholder="0"
+                className={inputClass}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                CW power for thermo-optic (dn/dT) analysis. Absorption α set per lens in System Editor.
+              </p>
+            </div>
+            {(() => {
+              const coldEfl =
+                systemState.traceResult?.performance?.fNumber != null && systemState.entrancePupilDiameter > 0
+                  ? systemState.traceResult.performance.fNumber * systemState.entrancePupilDiameter
+                  : (() => {
+                      const s0 = systemState.surfaces[0]
+                      const s1 = systemState.surfaces[1]
+                      return s0 && s1 && s0.radius !== 0 && s1.radius !== 0
+                        ? 1 / ((s0.refractiveIndex - 1) * (1 / s0.radius - 1 / -s1.radius))
+                        : 100
+                    })()
+              const thermal = computeThermalLensing(systemState, coldEfl)
+              return thermal.hasSignificantHeating ? (
+                <div className="text-xs space-y-1 pt-1 border-t border-white/10">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Cold EFL</span>
+                    <span className="tabular-nums text-slate-300">{thermal.eflCold.toFixed(2)} mm</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Effective EFL (heated)</span>
+                    <span className="tabular-nums text-orange-400">{thermal.eflEffective.toFixed(2)} mm</span>
+                  </div>
+                  <div className="flex justify-between text-orange-400 font-medium">
+                    <span>Δf (thermo-optic)</span>
+                    <span className="tabular-nums">{thermal.deltaEfl.toFixed(3)} mm</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500">
+                    <span>P absorbed</span>
+                    <span className="tabular-nums">{(thermal.pAbsorbed * 1000).toFixed(2)} mW</span>
+                  </div>
+                </div>
+              ) : null
+            })()}
+          </div>
         </section>
 
         {/* Physical Optics / Gaussian Beam */}

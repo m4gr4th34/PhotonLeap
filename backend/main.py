@@ -11,6 +11,8 @@ import numpy as np
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
+from typing import Optional, List
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -42,17 +44,17 @@ class SurfaceSchema(BaseModel):
     diameter: float
     material: str
     description: str
-    radiusTolerance: float | None = None
-    thicknessTolerance: float | None = None
-    tiltTolerance: float | None = None
+    radiusTolerance: Optional[float] = None
+    thicknessTolerance: Optional[float] = None
+    tiltTolerance: Optional[float] = None
 
 
 class OpticalStackRequest(BaseModel):
     """Optical stack from React frontend."""
-    surfaces: list[SurfaceSchema]
+    surfaces: List[SurfaceSchema]
     entrancePupilDiameter: float = 10
-    wavelengths: list[float] = [587.6]
-    fieldAngles: list[float] = [0]
+    wavelengths: List[float] = [587.6]
+    fieldAngles: List[float] = [0]
     numRays: int = 9
     focusMode: str = "On-Axis"  # 'On-Axis' | 'Balanced'
     m2Factor: float = 1.0  # Laser M² factor for Gaussian beam

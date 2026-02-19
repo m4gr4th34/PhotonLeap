@@ -234,6 +234,8 @@ export function SystemEditor({
               <th className="py-2 pr-3" title="Radius ± (mm)">R ±</th>
               <th className="py-2 pr-3" title="Thickness ± (mm)">T ±</th>
               <th className="py-2 pr-3" title="Tilt ± (deg)">Tilt ±</th>
+              <th className="py-2 pr-3" title="Absorption (1/cm) thermal">α</th>
+              <th className="py-2 pr-3" title="ISO 10110 scratch/dig">S/D</th>
               <th className="py-2 w-10" />
             </tr>
           </thead>
@@ -248,7 +250,7 @@ export function SystemEditor({
               onClick={addSurfaceAtStart}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={12} className="py-2">
+              <td colSpan={14} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at start
@@ -418,6 +420,42 @@ export function SystemEditor({
                     title="Tilt tolerance ± (deg)"
                   />
                 </td>
+                <td className="py-2 pr-3">
+                  {s.type === 'Glass' ? (
+                    <input
+                      type="number"
+                      value={s.absorptionCoefficient ?? ''}
+                      placeholder="0"
+                      min={0}
+                      step={0.001}
+                      onChange={(e) =>
+                        updateSurface(s.id, {
+                          absorptionCoefficient: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      className={`${numericInputClass} min-w-[3.5rem]`}
+                      title="Absorption coefficient (1/cm) for thermal lensing"
+                    />
+                  ) : (
+                    <span className="text-slate-600 text-xs">—</span>
+                  )}
+                </td>
+                <td className="py-2 pr-3">
+                  <input
+                    type="text"
+                    value={s.surfaceQuality ?? ''}
+                    placeholder="3/2"
+                    onChange={(e) =>
+                      updateSurface(s.id, {
+                        surfaceQuality: e.target.value.trim() || undefined,
+                      })
+                    }
+                    onClick={(e) => e.stopPropagation()}
+                    className={`${inputClass} min-w-[3rem]`}
+                    title="Surface quality (scratch/dig) per ISO 10110"
+                  />
+                </td>
                 <td className="py-2">
                   <button
                     type="button"
@@ -441,7 +479,7 @@ export function SystemEditor({
               onClick={() => addSurfaceAtIndex(surfaces.length)}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={12} className="py-2">
+              <td colSpan={14} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at end
