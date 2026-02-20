@@ -14,8 +14,8 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
-    video: 'on-first-retry',
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
+    video: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
   },
   outputDir: 'test-results',
   projects: [
@@ -30,6 +30,7 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: 'http://localhost:5173',
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
+    env: process.env.CI ? { VITE_API_URL: 'http://localhost:8000' } : undefined,
   },
 })
