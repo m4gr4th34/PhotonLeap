@@ -129,8 +129,9 @@ export function toLensX(
     if (s.sellmeierCoefficients) physics.sellmeier = s.sellmeierCoefficients
     if (s.coating) physics.coating = s.coating
     // Inline coating data: prefer surface's embedded data (from import), else customCoatingData
+    const dataType: 'table' | 'constant' = s.coatingDataPoints != null ? 'table' : 'constant'
     const def = s.coatingDataPoints != null || s.coatingConstantValue != null
-      ? { data_type: (s.coatingDataPoints != null ? 'table' : 'constant') as const, data_points: s.coatingDataPoints, constant_value: s.coatingConstantValue, is_hr: s.coatingIsHr }
+      ? { data_type: dataType, data_points: s.coatingDataPoints, constant_value: s.coatingConstantValue, is_hr: s.coatingIsHr }
       : s.coating ? customCoatingData[s.coating] : undefined
     if (def) {
       if (def.data_type === 'table' && def.data_points?.length) {
