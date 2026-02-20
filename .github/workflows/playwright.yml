@@ -37,6 +37,9 @@ jobs:
       - name: Install frontend dependencies
         run: cd web-app && npm ci
 
+      - name: Run unit tests
+        run: cd web-app && npm run test:unit
+
       - name: Install Playwright browsers
         run: cd web-app && npx playwright install chromium --with-deps
 
@@ -46,7 +49,7 @@ jobs:
           sleep 5
           curl -sf http://localhost:8000/api/coatings || true
 
-      - name: Run Playwright tests
+      - name: Run E2E tests
         run: cd web-app && npx playwright test --reporter=html --reporter=json=test-results.json
         env:
           CI: true
