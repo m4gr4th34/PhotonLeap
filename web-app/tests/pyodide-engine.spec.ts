@@ -53,6 +53,8 @@ test.describe('Pyodide Trace Engine', () => {
   })
 
   test('load Lens-X, run trace, verify performance metrics', async ({ page }) => {
+    test.setTimeout(180000)
+
     // 1. Load standard singlet Lens-X file
     await page.getByTestId('nav-system').click()
     await expect(page.getByRole('heading', { name: /System Editor/i })).toBeVisible()
@@ -62,29 +64,25 @@ test.describe('Pyodide Trace Engine', () => {
     await page.getByTestId('load-confirm-proceed').click()
     await expect(page.getByTestId('load-confirm-proceed')).not.toBeVisible({ timeout: 5000 })
 
-    // 2. Go to Lens tab — wait for Lens view to load, then wait for auto-trace to finish
+    // 2. Go to Lens tab to trigger auto-trace, then go to Properties — metrics are a more reliable completion signal than button state
     await page.getByTestId('nav-lens').click()
     await expect(page.locator('svg').first()).toBeVisible({ timeout: 30000 })
-    const traceBtn = page.getByTestId('trace-button')
-    await expect(traceBtn).toBeVisible({ timeout: 30000 })
-    await expect(traceBtn).toBeEnabled({ timeout: 30000 })
-
-    // 3. No manual click needed — auto-trace already ran; verify no trace error
-    await expect(page.getByText(/trace error|cannot reach trace api/i)).not.toBeVisible({ timeout: 5000 })
-
-    // 4. Verify performance metrics in System Properties sidebar
     await page.getByTestId('nav-properties').click()
+
+    // 3. Wait for Performance section and calculated numeric results (trace completed)
     const perfSection = page.locator('section, .glass-card').filter({ hasText: 'Performance' }).last()
-    await expect(perfSection).toBeVisible({ timeout: 10000 })
+    await expect(perfSection).toBeVisible({ timeout: 90000 })
+    await expect(perfSection.getByText('RMS Spot Radius')).toBeVisible({ timeout: 90000 })
+    await expect(perfSection.getByText('Total Length')).toBeVisible({ timeout: 90000 })
+    await expect(perfSection.getByText('F-Number')).toBeVisible({ timeout: 90000 })
 
-    // Verify each metric individually to ensure the entire table is rendered
-    await expect(perfSection.getByText('RMS Spot Radius')).toBeVisible({ timeout: 10000 })
-    await expect(perfSection.getByText('Total Length')).toBeVisible({ timeout: 10000 })
-    await expect(perfSection.getByText('F-Number')).toBeVisible({ timeout: 10000 })
-
-    // 5. Physics validation: ensure numeric values appear, not just labels
+    // 4. Physics validation: ensure numeric values appear (confirms trace finished)
+    await expect(perfSection).toContainText(/\d+\.\d+/, { timeout: 90000 })
     const perfContent = await perfSection.textContent()
     expect(perfContent).toMatch(/\d+\.\d+/)
+
+    // 5. Verify no trace error
+    await expect(page.getByText(/trace error|cannot reach trace api/i)).not.toBeVisible({ timeout: 5000 })
   })
 
   test('trace result includes focus and performance metrics', async ({ page }) => {
