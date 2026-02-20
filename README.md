@@ -1,18 +1,16 @@
 <div align="center">
 
-[![Open in Browser](https://img.shields.io/badge/Open_in_Browser-Live_Demo-22D3EE?style=for-the-badge&logo=google-chrome&logoColor=white&labelColor=6366F1)](https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/)
+[![Open in Browser](https://img.shields.io/badge/Open_in_Browser-Live_Demo-22D3EE?style=for-the-badge&logo=google-chrome&logoColor=white&labelColor=6366F1)](https://m4gr4th34.github.io/MacOpticsApp/)
 
 **No installation required · Works in all modern browsers** (Chrome, Firefox, Safari, Edge)
 
-<sub>Replace <code>YOUR_GITHUB_USERNAME</code> with your GitHub username in the links above.</sub>
-
 <br />
 
-  <a href="https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/">
+  <a href="https://m4gr4th34.github.io/MacOpticsApp/">
     <img src="assets/banner.png" alt="MacOptics" width="100%" style="max-width: 100%;" />
   </a>
   <br /><br />
-  <a href="https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
+  <a href="https://m4gr4th34.github.io/MacOpticsApp/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
     🚀 Open Live Demo
   </a>
   <br /><br /><br />
