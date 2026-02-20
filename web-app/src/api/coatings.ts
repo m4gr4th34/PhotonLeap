@@ -74,22 +74,30 @@ export async function fetchCoatings(): Promise<CoatingOption[]> {
   }
 }
 
+/** Fallback library when API unavailable (e.g. CI, offline) — ensures catalog has BBAR and common coatings */
+const LIBRARY_FALLBACK: CoatingLibraryItem[] = COATINGS_FALLBACK.map((c) => ({
+  ...c,
+  category: c.is_hr ? 'HR' : 'AR',
+  source: 'builtin' as const,
+}))
+
 /** Fetch full library with category and source (built-in vs custom) */
 export async function fetchCoatingsLibrary(): Promise<CoatingLibraryItem[]> {
   try {
     const res = await fetch(`${API_BASE}/api/coatings/library`)
-    if (!res.ok) return []
+    if (!res.ok) return LIBRARY_FALLBACK
     const data = await res.json()
-    if (!Array.isArray(data)) return []
-    return data.map((c: { name?: string; description?: string; is_hr?: boolean; category?: string; source?: string }) => ({
+    if (!Array.isArray(data)) return LIBRARY_FALLBACK
+    const mapped = data.map((c: { name?: string; description?: string; is_hr?: boolean; category?: string; source?: string }) => ({
       name: c.name ?? '',
       description: c.description ?? '',
       is_hr: c.is_hr ?? false,
       category: c.category ?? 'Custom',
       source: (c.source === 'custom' ? 'custom' : 'builtin') as 'builtin' | 'custom',
     }))
+    return mapped.length > 0 ? mapped : LIBRARY_FALLBACK
   } catch {
-    return []
+    return LIBRARY_FALLBACK
   }
 }
 

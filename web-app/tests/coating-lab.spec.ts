@@ -10,7 +10,10 @@ test.describe('Coating Lab', () => {
 
     // 2. Open catalog and select BBAR
     await page.getByTestId('coating-browse-catalog').click()
+    await page.waitForTimeout(500)
     await page.waitForLoadState('networkidle')
+    const content = await page.content()
+    console.log('DOM Snapshot:', content.includes('BBAR') ? 'BBAR found in text' : 'BBAR NOT found in text')
     await expect(page.getByTestId('coating-catalog-BBAR')).toBeVisible({ timeout: 10000 })
     await page.getByTestId('coating-catalog-BBAR').click({ timeout: 15000 })
 
