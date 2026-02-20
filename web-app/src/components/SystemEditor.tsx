@@ -684,8 +684,10 @@ export function SystemEditor({
     e.target.value = ''
     if (!file) return
 
+    console.log('File selected:', file.name)
     setToastMessage('Processing Drawing...')
     try {
+      console.log('Reading file content locally (no fetch)...')
       const { surfaces: imported } = await importLensSystem(file)
       setToastMessage(null)
       if (imported.length === 0) {

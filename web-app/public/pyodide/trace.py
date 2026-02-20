@@ -396,3 +396,76 @@ def run_trace(optical_stack):
             "focusZ": focus_z,
         },
     }
+
+
+def parse_import_file_content(content: str) -> list:
+    """
+    Parse LENS-X or optical JSON file content (string) into surfaces list.
+    For use when file content is passed via postMessage (no fetch).
+    Handles formatting errors gracefully without crashing the worker.
+    Returns list of surface dicts compatible with run_trace, or raises ValueError.
+    """
+    import json
+
+    if not content or not isinstance(content, str):
+        raise ValueError("Expected non-empty string content")
+
+    content = content.strip()
+    if not content:
+        raise ValueError("Empty file content")
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValueError("Expected JSON object")
+
+    # LENS-X format: optics.surfaces
+    optics = data.get("optics") or {}
+    surfaces_raw = optics.get("surfaces") if isinstance(optics, dict) else None
+
+    # Fallback: top-level surfaces / Surfaces / sequence
+    if not surfaces_raw:
+        for key in ("surfaces", "Surfaces", "sequence", "elements"):
+            surfaces_raw = data.get(key)
+            if isinstance(surfaces_raw, list):
+                break
+
+    if not isinstance(surfaces_raw, list) or len(surfaces_raw) == 0:
+        raise ValueError("No surfaces array found in file")
+
+    result = []
+    for i, raw in enumerate(surfaces_raw):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            r = raw.get("radius") or raw.get("Radius")
+            radius = 0.0 if r in ("infinity", "inf", "flat", 0) else float(r or 0)
+            thickness = float(raw.get("thickness") or raw.get("Thickness") or 0)
+            aperture = float(raw.get("aperture") or raw.get("Aperture") or 12.5)
+            diameter = max(0.1, 2 * aperture)
+            physics = raw.get("physics") or {}
+            n = float(physics.get("refractive_index") or raw.get("refractiveIndex") or 1.52)
+            material = str(raw.get("material") or raw.get("Material") or "N-BK7").strip()
+            surf_type = str(raw.get("type") or raw.get("Type") or "Glass").lower()
+            if surf_type in ("air", "object", "image", "stop"):
+                n = 1.0
+                material = "Air"
+            result.append({
+                "id": raw.get("id", f"surf-{i}"),
+                "type": "Air" if n <= 1.01 else "Glass",
+                "radius": radius,
+                "thickness": thickness,
+                "refractiveIndex": n,
+                "diameter": diameter,
+                "material": material,
+                "description": str(raw.get("description") or raw.get("Comment") or f"Surface {i + 1}"),
+                "coating": physics.get("coating") if isinstance(physics, dict) else None,
+                "sellmeierCoefficients": physics.get("sellmeier") if isinstance(physics, dict) else None,
+            })
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Surface {i + 1}: {e}") from e
+
+    return result
