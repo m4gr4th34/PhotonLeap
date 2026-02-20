@@ -50,7 +50,7 @@ jobs:
           curl -sf http://localhost:8000/api/coatings || true
 
       - name: Run E2E tests
-        run: cd web-app && npx playwright test --reporter=html --reporter=json=test-results.json
+        run: cd web-app && npx playwright test
         env:
           CI: true
 
