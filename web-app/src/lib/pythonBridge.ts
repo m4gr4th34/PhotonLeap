@@ -21,14 +21,13 @@ let initPromise: Promise<void> | null = null
 
 function getWorkerUrl(): string {
   // Use Vite BASE_URL for correct resolution on GitHub Pages (base: '/repo-name/').
-  // document.baseURI parsing can fail when URL has no trailing slash.
+  // Resolve relative to location.href for reliable Worker loading when serving dist/.
   const base = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || '/'
   const baseNorm = base.endsWith('/') ? base : `${base}/`
   const path = `${baseNorm}pyodide/worker.js`
-  if (typeof document !== 'undefined' && document.baseURI) {
-    return new URL(path, document.baseURI).href
-  }
-  return path.startsWith('http') ? path : (typeof location !== 'undefined' ? new URL(path, location.href).href : path)
+  return typeof location !== 'undefined'
+    ? new URL(path, location.href).href
+    : (path.startsWith('http') ? path : (typeof document !== 'undefined' ? new URL(path, document.baseURI).href : path))
 }
 
 async function ensureWorker(): Promise<Worker> {

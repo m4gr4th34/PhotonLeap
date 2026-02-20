@@ -50,8 +50,8 @@ export const config = {
     extendZMin: 50,
   },
 
-  /** Ray colors by field angle (on-axis, mid, edge) */
-  rayColors: ['#22D3EE', '#F97316', '#22C55E'] as const,
+  /** Ray colors by field angle index: 0 (0°) Cyan, 1 (7°) Green, 2 (14°) Orange */
+  rayColors: ['#22D3EE', '#22C55E', '#F97316'] as const,
 
   /** Paraxial fallback (when backend unavailable) */
   paraxial: {

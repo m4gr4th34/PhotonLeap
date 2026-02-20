@@ -38,6 +38,20 @@ export type TraceResponse = {
     waistZ: number
     focusZ: number
   }
+  /** Pyodide: ray termination reasons for debugging (TIR, MISSED_SURFACE, etc.) */
+  terminationLog?: Array<{
+    reason: string
+    surf: number
+    z: number
+    y: number
+    direction_vector?: [number, number]
+    current_z?: number
+    n1?: number
+    n2?: number
+    resultant?: [number, number]
+    wvl_nm?: number
+    extra?: Record<string, unknown>
+  }>
   error?: string
 }
 

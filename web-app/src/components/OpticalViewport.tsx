@@ -10,6 +10,7 @@ import { Play, Loader2, ZoomIn, ZoomOut, Maximize2, Dices, LineChart } from 'luc
 import type { SystemState, TraceResult, MetricsAtZ } from '../types/system'
 import type { HighlightedMetric } from '../types/ui'
 import { traceOpticalStack, runMonteCarlo, type MonteCarloResponse } from '../api/trace'
+import { isPyodideEnabled } from '../lib/pythonBridge'
 import { ChromaticAberrationOverlay } from './ChromaticAberrationOverlay'
 import { config } from '../config'
 import { computeDispersion } from '../lib/dispersion'
@@ -655,7 +656,12 @@ export function OpticalViewport({
           traceError: res.error ?? null,
         }))
       } else {
+        if (res.terminationLog?.length) {
+          console.warn('[Trace termination log]', res.terminationLog)
+        }
         const rawRays = res.rays ?? []
+        // Ensure rays go left-to-right (object to image): sort by z ascending.
+        // If already sorted, this is a no-op; if reversed (image-to-object), this fixes it.
         const rays = rawRays.map((pts) => [...pts].sort((a, b) => a[0] - b[0]))
         onSystemStateChange((prev) => ({
           ...prev,
@@ -681,7 +687,9 @@ export function OpticalViewport({
         /fetch|network|connection|cors|failed to fetch/i.test(raw) ||
         raw === 'Trace failed'
       const msg = isNetwork
-        ? `Cannot reach trace API. Is the backend running? Start it with: uvicorn backend.main:app --reload --port 8000`
+        ? isPyodideEnabled()
+          ? `Pyodide worker failed to load. Ensure you're serving from the dist folder: cd dist && npx serve . (or use start-mac.command)`
+          : `Cannot reach trace API. Is the backend running? Start it with: uvicorn backend.main:app --reload --port 8000`
         : raw
       onSystemStateChange((prev) => ({
         ...prev,
@@ -871,12 +879,13 @@ export function OpticalViewport({
       const numFields = Math.max(1, fieldAngles.length)
       const indices = traceResult.rayFieldIndices
       const colors = config.rayColors
+      const numGroups = Math.max(1, Math.min(colors.length, indices?.length ? Math.max(...indices) + 1 : numFields))
       const groups: Map<number, Ray[]> = new Map()
       traceResult.rays.forEach((pts, i) => {
         const fieldIndex =
           indices && indices[i] != null
-            ? Math.min(indices[i], numFields - 1)
-            : Math.min(Math.floor(i / Math.ceil(traceResult!.rays!.length / numFields)), numFields - 1)
+            ? Math.min(indices[i], numGroups - 1)
+            : Math.min(Math.floor(i / Math.ceil(traceResult!.rays!.length / numGroups)), numGroups - 1)
         const color = colors[Math.min(fieldIndex, colors.length - 1)]
         const ray: Ray = {
           points: pts.map(([z, y]) => ({ x: z, y })),
@@ -1518,13 +1527,16 @@ export function OpticalViewport({
             <g
               key={origIdx}
               stroke={group.color}
-              strokeWidth="1.2"
-              strokeOpacity="0.9"
+              strokeWidth="0.75"
+              strokeOpacity="0.8"
               fill="none"
-              style={{ filter: `drop-shadow(0 0 2px ${group.color})` }}
+              style={{ filter: `drop-shadow(0 0 1px ${group.color}40)` }}
             >
               {group.rays.map((ray, rayIdx) => {
-                const d = ray.points
+                // Draw rays left-to-right (object→image). Reverse if trace returns image-to-object order.
+                const pts = ray.points
+                const ordered = pts[0]?.x <= pts[pts.length - 1]?.x ? pts : [...pts].reverse()
+                const d = ordered
                   .map((p, j) => `${j === 0 ? 'M' : 'L'} ${toSvg(p.x, p.y)}`)
                   .join(' ')
                 const globalIdx = raysByField
@@ -1539,7 +1551,7 @@ export function OpticalViewport({
                     animate={
                       isTracing
                         ? { pathLength: 1, opacity: [0.5, 1, 0.5] }
-                        : { pathLength: 1, opacity: 0.9 }
+                        : { pathLength: 1, opacity: 0.8 }
                     }
                     transition={
                       isTracing
