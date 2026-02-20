@@ -1127,18 +1127,18 @@ export function OpticalViewport({
           onClick={handleTrace}
           disabled={isTracing}
           className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all disabled:opacity-70"
-          style={{
-            background: 'linear-gradient(135deg, #22D3EE 0%, #0891b2 100%)',
-            color: '#0B1120',
-            boxShadow: '0 0 24px rgba(34, 211, 238, 0.5)',
-          }}
-        >
-          {isTracing ? (
-            <Loader2 className="w-5 h-5 animate-spin" strokeWidth={2} />
-          ) : (
-            <Play className="w-5 h-5" fill="currentColor" strokeWidth={0} />
-          )}
-          {isTracing ? 'Tracing…' : 'Trace'}
+            style={{
+              background: 'linear-gradient(135deg, #22D3EE 0%, #0891b2 100%)',
+              color: '#0B1120',
+              boxShadow: '0 0 24px rgba(34, 211, 238, 0.5)',
+            }}
+          >
+            {isTracing ? (
+              <Loader2 className="w-5 h-5 animate-spin" strokeWidth={2} />
+            ) : (
+              <Play className="w-5 h-5" fill="currentColor" strokeWidth={0} />
+            )}
+            {isTracing ? 'Tracing…' : 'Trace'}
         </motion.button>
         <motion.button
           whileHover={{ scale: 1.03 }}

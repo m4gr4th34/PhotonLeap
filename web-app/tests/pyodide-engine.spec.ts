@@ -36,7 +36,7 @@ test.describe('Pyodide Trace Engine', () => {
   test('trace produces rays and surfaces in viewport', async ({ page }) => {
     await page.getByTestId('nav-lens').click()
     await expect(page.locator('svg').first()).toBeVisible({ timeout: 30000 })
-    const traceBtn = page.getByTestId('trace-button')
+    const traceBtn = page.getByRole('button', { name: 'Trace' })
     await expect(traceBtn).toBeVisible({ timeout: 30000 })
     await expect(traceBtn).toBeEnabled({ timeout: 30000 })
 
@@ -88,7 +88,7 @@ test.describe('Pyodide Trace Engine', () => {
   test('trace result includes focus and performance metrics', async ({ page }) => {
     await page.getByTestId('nav-lens').click()
     await expect(page.locator('svg').first()).toBeVisible({ timeout: 30000 })
-    const traceBtn = page.getByTestId('trace-button')
+    const traceBtn = page.getByRole('button', { name: 'Trace' })
     await expect(traceBtn).toBeVisible({ timeout: 30000 })
     await expect(traceBtn).toBeEnabled({ timeout: 30000 })
 
@@ -115,15 +115,16 @@ test.describe('Pyodide Trace Engine — Fallback', () => {
     await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 15000 })
 
     await page.getByTestId('nav-lens').click()
+    await expect(page.getByTestId('nav-lens')).toHaveClass(/bg-white\/10/, { timeout: 5000 })
     await expect(page.locator('svg').first()).toBeVisible({ timeout: 30000 })
 
-    const traceBtn = page.getByTestId('trace-button')
+    const traceBtn = page.getByRole('button', { name: 'Trace' })
     await expect(traceBtn).toBeVisible({ timeout: 10000 })
     await expect(traceBtn).toBeEnabled({ timeout: 5000 })
     await traceBtn.click()
 
     // Trace button becomes disabled and shows 'Tracing…' while hung on missing worker
-    await expect(page.getByTestId('trace-button')).toBeDisabled()
+    await expect(page.getByRole('button', { name: /Tracing|Trace/ })).toBeDisabled()
 
     // App shows 'Calculating…' while attempting trace
     await expect(page.getByText('Calculating…')).toBeVisible({ timeout: 5000 })

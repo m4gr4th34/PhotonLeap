@@ -99,12 +99,12 @@
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 1504,
+                      "duration": 1553,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-02-20T19:53:25.857Z",
+                      "startTime": "2026-02-20T20:44:31.734Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -123,7 +123,7 @@
               "tags": [],
               "tests": [
                 {
-                  "timeout": 120000,
+                  "timeout": 180000,
                   "annotations": [],
                   "expectedStatus": "passed",
                   "projectId": "chromium",
@@ -133,12 +133,12 @@
                       "workerIndex": 1,
                       "parallelIndex": 1,
                       "status": "passed",
-                      "duration": 2097,
+                      "duration": 2728,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-02-20T19:53:25.858Z",
+                      "startTime": "2026-02-20T20:44:31.740Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -148,7 +148,7 @@
               ],
               "id": "d6dd013ef318ab5d08c0-dd95f68288a0fcd2066b",
               "file": "pyodide-engine.spec.ts",
-              "line": 54,
+              "line": 55,
               "column": 3
             },
             {
@@ -167,12 +167,12 @@
                       "workerIndex": 2,
                       "parallelIndex": 2,
                       "status": "passed",
-                      "duration": 1502,
+                      "duration": 1563,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-02-20T19:53:25.857Z",
+                      "startTime": "2026-02-20T20:44:31.733Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -190,7 +190,7 @@
         {
           "title": "Pyodide Trace Engine — Fallback",
           "file": "pyodide-engine.spec.ts",
-          "line": 102,
+          "line": 103,
           "column": 6,
           "specs": [
             {
@@ -209,12 +209,12 @@
                       "workerIndex": 3,
                       "parallelIndex": 3,
                       "status": "passed",
-                      "duration": 1485,
+                      "duration": 1538,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-02-20T19:53:25.858Z",
+                      "startTime": "2026-02-20T20:44:31.734Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -224,7 +224,7 @@
               ],
               "id": "d6dd013ef318ab5d08c0-6c510d302a3182e44215",
               "file": "pyodide-engine.spec.ts",
-              "line": 113,
+              "line": 114,
               "column": 3
             }
           ]
@@ -234,8 +234,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-02-20T19:53:25.262Z",
-    "duration": 3285.474,
+    "startTime": "2026-02-20T20:44:31.173Z",
+    "duration": 3914.03,
     "expected": 4,
     "skipped": 0,
     "unexpected": 0,
