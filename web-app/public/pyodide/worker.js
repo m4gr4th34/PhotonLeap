@@ -10,9 +10,12 @@ let pyodide = null;
 let traceLoaded = false;
 
 async function loadTraceScript() {
-  const base = self.location.href.replace(/[^/]*$/, '');
+  // Worker location is the script URL; derive trace.py from same directory.
+  const scriptUrl = self.location.href;
+  const base = scriptUrl.replace(/[^/]*$/, '');
+  const traceUrl = base + 'trace.py';
   try {
-    const res = await fetch(base + 'trace.py', { credentials: 'omit' });
+    const res = await fetch(traceUrl, { credentials: 'omit' });
     if (res.ok) return await res.text();
   } catch (_) {}
   return `def run_trace(optical_stack):

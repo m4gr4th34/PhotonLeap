@@ -655,11 +655,13 @@ export function OpticalViewport({
           traceError: res.error ?? null,
         }))
       } else {
+        const rawRays = res.rays ?? []
+        const rays = rawRays.map((pts) => [...pts].sort((a, b) => a[0] - b[0]))
         onSystemStateChange((prev) => ({
           ...prev,
           hasTraced: true,
           traceResult: {
-            rays: res.rays ?? [],
+            rays,
             rayFieldIndices: res.rayFieldIndices,
             rayPower: res.rayPower,
             surfaces: res.surfaces ?? [],
