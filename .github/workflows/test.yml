@@ -40,5 +40,11 @@ jobs:
       - name: Install dependencies
         run: cd web-app && npm ci
 
-      - name: Run tests
-        run: cd web-app && npm run test:run
+      - name: Run unit tests
+        run: cd web-app && npm run test:unit
+
+      - name: Install Playwright browsers
+        run: cd web-app && npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: cd web-app && npm run test:e2e
