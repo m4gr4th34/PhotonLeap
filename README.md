@@ -1,10 +1,19 @@
 <div align="center">
-  <a href="http://localhost:5173">
+
+[![Open in Browser](https://img.shields.io/badge/Open_in_Browser-Live_Demo-22D3EE?style=for-the-badge&logo=google-chrome&logoColor=white&labelColor=6366F1)](https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/)
+
+**No installation required · Works in all modern browsers** (Chrome, Firefox, Safari, Edge)
+
+<sub>Replace <code>YOUR_GITHUB_USERNAME</code> with your GitHub username in the links above.</sub>
+
+<br />
+
+  <a href="https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/">
     <img src="assets/banner.png" alt="MacOptics" width="100%" style="max-width: 100%;" />
   </a>
   <br /><br />
-  <a href="http://localhost:5173" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 8px; padding: 12px 24px; margin: 20px 0;">
-    🚀 View Live Demo
+  <a href="https://YOUR_GITHUB_USERNAME.github.io/MacOpticsApp/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
+    🚀 Open Live Demo
   </a>
   <br /><br /><br />
 </div>
@@ -13,7 +22,9 @@
 
 # MacOptics — Optical Ray Tracing
 
-Open-source, license-free optical design software with a **React + FastAPI** architecture. Design singlet lenses, run ray traces, and visualize performance metrics.
+**MacOptics v2.0: The Zero-Install Revolution. Physics at the Edge.**
+
+Open-source, license-free optical design software. Design singlet lenses, run ray traces, and visualize performance metrics—with or without a backend. The Python physics engine now runs **directly in your browser** via Pyodide (WebAssembly).
 
 ![Lens Designer screenshot](docs/screenshot.png)
 
@@ -29,6 +40,54 @@ Open-source, license-free optical design software with a **React + FastAPI** arc
 ![NumPy](https://img.shields.io/badge/NumPy-2-013243?style=flat-square&logo=numpy)
 
 **Platform Support** — Dynamic Alt / ⌥ Option key labels for Override Snap-to-Focus; adapts to Windows and macOS.
+
+---
+
+## Zero-Install (Pyodide) Mode
+
+MacOptics supports a **zero-install** architecture: the Python physics engine runs in the browser via Pyodide (WebAssembly). No backend server required.
+
+> 📄 **See [RELEASE_NOTES.md](RELEASE_NOTES.md)** for the full v2.0 announcement—*The Photon Leap*.
+
+| Mode | Build | Trace Engine |
+|------|-------|--------------|
+| **Standard** | `npm run build` | HTTP backend (FastAPI) |
+| **Standalone** | `npm run build:standalone` | In-browser Pyodide worker |
+
+**Standalone build** produces a self-contained `dist/` folder suitable for ZIP distribution:
+
+```bash
+cd web-app && npm run build:standalone
+# Optional: create ZIP
+npm run build:zip
+```
+
+Open `dist/index.html` in a browser (or serve via `npx vite preview`). The Pyodide worker loads Python + NumPy from CDN and executes ray-trace logic locally. **Lens-X import/export** works seamlessly—all parsing is client-side.
+
+> **Note:** Some browsers restrict Web Workers when opening `file://` directly. For best results, serve the `dist/` folder over HTTP (e.g. `npx serve dist` or `python -m http.server` in `dist/`).
+
+**GitHub Pages:** The [deploy workflow](.github/workflows/deploy.yml) builds on push to `main` and deploys to the `gh-pages` branch. Enable Pages in repo Settings → Pages → Source: `gh-pages` branch. Live at `https://<user>.github.io/<repo>/`.
+
+---
+
+## 🛠️ For Developers
+
+**Help us push the boundaries of browser-based optical engineering.** MacOptics uses a hybrid React–Pyodide architecture: the Python physics engine runs in a Web Worker and communicates with the UI via `postMessage`. New contributors should read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the "Neural Link" architecture, file map (Brain/Nerves/Body), and guidelines for Python changes, type safety, and testing.
+
+### Development Workflow (Pyodide Mode)
+
+```bash
+cd web-app
+VITE_USE_PYODIDE=true npm run dev
+```
+
+Open **http://localhost:5173**. The Pyodide worker loads from the dev server; trace runs entirely in-browser. For standalone builds:
+
+```bash
+cd web-app
+npm run build:standalone
+npx serve dist
+```
 
 ---
 
@@ -81,7 +140,23 @@ The **Coating Lab** is a professional-grade suite for managing thin-film perform
 
 ---
 
-## Installation
+## 🚀 Getting Started
+
+### How to Run
+
+| User Type | Steps |
+|-----------|-------|
+| **Non-tech** | 1. Download `macoptics-standalone.zip`<br>2. Extract the folder<br>3. Double-click `index.html`<br>4. *(If your browser blocks `file://`: run `npx serve .` in the extracted folder, then open the URL)* |
+| **Zero-install (standalone)** | 1. `cd web-app && npm run build:standalone`<br>2. `cd dist && npx serve .` or `python -m http.server`<br>3. Open the URL (e.g. `http://localhost:3000`) |
+| **Full stack (backend + frontend)** | 1. Backend: `uvicorn backend.main:app --reload --port 8000`<br>2. Frontend: `cd web-app && npm run dev`<br>3. Open **http://localhost:5173** |
+
+### Key Benefits
+
+- **No Python/Node required** — Just double-click `index.html` in the standalone ZIP.
+- **Air-gapped privacy** — Optical designs never leave your machine; calculations happen in RAM.
+- **Instant interaction** — Zero network latency for ray-tracing and Monte Carlo simulations.
+
+### Installation (Full Stack)
 
 **Backend (FastAPI / Python)**
 
@@ -98,7 +173,7 @@ cd web-app
 npm install
 ```
 
-### Quick Start
+### Quick Start (Full Stack)
 
 Run both services in two terminal windows:
 
@@ -184,3 +259,11 @@ pytest tests/ -v
 ## API Details
 
 See [README_API.md](README_API.md) for endpoint specs and response format.
+
+---
+
+## 🤝 Contributors Welcome
+
+- **Pythonistas** — Optimize the browser-native trace engine in `web-app/public/pyodide/trace.py`.
+- **Frontend engineers** — Refine the **Neural Link** (Web Worker bridge) in `web-app/src/lib/pythonBridge.ts`.
+- **Lens-X** — The interchange standard holds the ecosystem together; see `LENS_X_SPEC.md`.

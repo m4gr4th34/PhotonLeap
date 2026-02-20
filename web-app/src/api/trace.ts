@@ -1,11 +1,13 @@
 /**
  * API client for optical trace backend.
  * Sends optical_stack, receives (z,y) ray and surface coordinates.
- * Surface shape matches types/system.Surface (single source of truth).
+ * When VITE_USE_PYODIDE=true, uses in-browser Pyodide worker (zero-install).
+ * Otherwise uses HTTP backend.
  */
 
 import type { Surface, FocusMode } from '../types/system'
 import { config } from '../config'
+import { traceViaPyodide, isPyodideEnabled } from '../lib/pythonBridge'
 
 export type TraceResponse = {
   rays?: number[][][]  // [[[z,y], ...], ...] per ray
@@ -50,6 +52,9 @@ export async function traceOpticalStack(optical_stack: {
   focusMode?: FocusMode
   m2Factor?: number
 }): Promise<TraceResponse> {
+  if (isPyodideEnabled()) {
+    return traceViaPyodide(optical_stack)
+  }
   const payload = {
     ...optical_stack,
     focusMode: optical_stack.focusMode ?? 'On-Axis',

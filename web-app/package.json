@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:standalone": "cp node_modules/coi-serviceworker/coi-serviceworker.min.js public/ && VITE_USE_PYODIDE=true tsc -b && vite build --config vite.standalone.config.ts",
+    "build:zip": "npm run build:standalone && cd dist && zip -r ../macoptics-standalone.zip . && cd ..",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:e2e",
@@ -33,6 +35,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
+    "coi-serviceworker": "^0.1.7",
     "eslint": "^9.13.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
