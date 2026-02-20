@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test'
 test.describe('Monte Carlo', () => {
   test('changing Tilt in System Editor updates the input value', async ({ page }) => {
     await page.goto('/')
+    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 60000 })
 
     // 1. Navigate to System Editor
     await page.getByTestId('nav-system').click()

@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test'
 test.describe('Coating Lab', () => {
   test('BBAR selection shows Spectral Performance graph', async ({ page }) => {
     await page.goto('/')
+    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 60000 })
 
     // 1. Navigate to Coating Lab
     await page.getByTestId('nav-coating').click()

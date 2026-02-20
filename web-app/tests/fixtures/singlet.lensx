@@ -1,0 +1,33 @@
+{
+  "lens_x_version": "1.0",
+  "metadata": { "project_name": "Standard Singlet", "date": "2026-02-20" },
+  "system_settings": { "mc_iterations": 1000, "mc_seed": 42, "target_yield": 0.95 },
+  "optics": {
+    "surfaces": [
+      {
+        "radius": 100,
+        "thickness": 5,
+        "aperture": 12.5,
+        "material": "N-BK7",
+        "type": "Glass",
+        "description": "Front surface",
+        "physics": { "refractive_index": 1.5168, "coating": "Uncoated" },
+        "manufacturing": { "surface_quality": "3/2", "radius_tolerance": 0, "thickness_tolerance": 0, "tilt_tolerance": 0 },
+        "tolerances": { "radius_tol": 0, "thickness_tol": 0, "decenter_x": 0, "decenter_y": 0, "tilt_x": 0, "tilt_y": 0, "index_tol": 0 }
+      },
+      {
+        "radius": -100,
+        "thickness": 95,
+        "aperture": 12.5,
+        "material": "Air",
+        "type": "Air",
+        "description": "Back surface",
+        "physics": { "coating": "Uncoated" },
+        "manufacturing": { "surface_quality": "3/2", "radius_tolerance": 0, "thickness_tolerance": 0, "tilt_tolerance": 0 },
+        "tolerances": { "radius_tol": 0, "thickness_tol": 0, "decenter_x": 0, "decenter_y": 0, "tilt_x": 0, "tilt_y": 0, "index_tol": 0 }
+      }
+    ],
+    "entrance_pupil_diameter": 10,
+    "reference_wavelength_nm": 587.6
+  }
+}
