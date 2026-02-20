@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:standalone": "cp node_modules/coi-serviceworker/coi-serviceworker.min.js public/ && VITE_USE_PYODIDE=true tsc -b && vite build --config vite.standalone.config.ts",
-    "build:zip": "npm run build:standalone && cd dist && zip -r ../macoptics-standalone.zip . && cd ..",
+    "build:zip": "npm run build:standalone && chmod +x dist/start-mac.command 2>/dev/null || true && cd dist && zip -r ../macoptics-standalone.zip . && cd ..",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:e2e",

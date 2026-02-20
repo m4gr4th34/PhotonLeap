@@ -144,13 +144,13 @@ The **Coating Lab** is a professional-grade suite for managing thin-film perform
 
 | User Type | Steps |
 |-----------|-------|
-| **Non-tech** | 1. Download `macoptics-standalone.zip`<br>2. Extract the folder<br>3. Double-click `index.html`<br>4. *(If your browser blocks `file://`: run `npx serve .` in the extracted folder, then open the URL)* |
+| **Non-tech** | 1. Download `macoptics-standalone.zip`<br>2. Extract the folder<br>3. Run **`start-mac.command`** (Mac) or **`start-windows.bat`** (Windows)<br>4. Browser opens at http://localhost:8080 — no extra install needed (uses built-in Python) |
 | **Zero-install (standalone)** | 1. `cd web-app && npm run build:standalone`<br>2. `cd dist && npx serve .` or `python -m http.server`<br>3. Open the URL (e.g. `http://localhost:3000`) |
 | **Full stack (backend + frontend)** | 1. Backend: `uvicorn backend.main:app --reload --port 8000`<br>2. Frontend: `cd web-app && npm run dev`<br>3. Open **http://localhost:5173** |
 
 ### Key Benefits
 
-- **No Python/Node required** — Just double-click `index.html` in the standalone ZIP.
+- **One-click launch** — Run `start-mac.command` or `start-windows.bat`; uses Python’s built-in server (no npm, no pip).
 - **Air-gapped privacy** — Optical designs never leave your machine; calculations happen in RAM.
 - **Instant interaction** — Zero network latency for ray-tracing and Monte Carlo simulations.
 

@@ -63,8 +63,10 @@ test.describe('Pyodide Trace Engine', () => {
 
     // 2. Go to Lens tab — app auto-traces on load (pendingTrace); wait for it to finish
     await page.getByTestId('nav-lens').click()
-    const traceBtn = page.getByRole('button', { name: /^trace$/i })
+    // Locator matches both 'Trace' and 'Tracing…' during state transition
+    const traceBtn = page.getByRole('button', { name: /^trace/i })
     await expect(traceBtn).toBeVisible({ timeout: 15000 })
+    // Wait for auto-trace to complete (button becomes enabled, label returns to 'Trace')
     await expect(traceBtn).toBeEnabled({ timeout: 30000 })
 
     // 3. No manual click needed — auto-trace already ran; verify no trace error
