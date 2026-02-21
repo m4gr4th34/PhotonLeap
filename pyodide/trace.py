@@ -766,6 +766,180 @@ def run_optimize_colors(optical_stack):
     return {"recommended_glass": best_glass, "estimated_lca_reduction": round(float(reduction), 6)}
 
 
+def _abcd_propagate(q_in, a, b, c, d):
+    """Propagate complex beam parameter: q_out = (A*q_in + B) / (C*q_in + D)"""
+    denom = c * q_in + d
+    if abs(denom) < 1e-20:
+        return np.inf + 0j
+    return (a * q_in + b) / denom
+
+
+def _q_to_waist_rayleigh(q, wvl_mm):
+    """At beam waist: q = j*z_R. Returns (w0, z_R) in mm."""
+    if abs(q) > 1e10:
+        return 0.0, 0.0
+    z_r = q.imag
+    if z_r <= 0:
+        return 0.0, 0.0
+    w0_sq = wvl_mm * z_r / np.pi
+    w0 = float(np.sqrt(w0_sq))
+    return w0, float(z_r)
+
+
+def _beam_radius_from_q(q, wvl_mm):
+    """Beam radius w (1/e²) from q."""
+    if abs(q) < 1e-20 or q.imag <= 0:
+        return 0.0
+    denom = np.pi * q.imag
+    w_sq = wvl_mm * (q.real**2 + q.imag**2) / denom
+    return float(np.sqrt(max(0, w_sq)))
+
+
+def _beam_radius_at_z(w0, z_r, z_from_waist):
+    """1/e² beam radius at distance z from waist."""
+    return w0 * np.sqrt(1.0 + (z_from_waist / z_r) ** 2)
+
+
+def run_gaussian_beam(optical_stack):
+    """
+    ABCD matrix Gaussian beam propagation. Accepts optical_stack; returns
+    beamEnvelope, spotSizeAtFocus, rayleighRange, waistZ, focusZ.
+    """
+    surfaces = optical_stack.get("surfaces", [])
+    if not surfaces:
+        return {"beamEnvelope": [], "spotSizeAtFocus": 0, "rayleighRange": 0, "waistZ": 0, "focusZ": 0}
+    epd = float(optical_stack.get("entrancePupilDiameter", 10) or 10)
+    wvl_nm = float(optical_stack.get("wavelengths", [587.6])[0] or 587.6)
+    m2 = max(0.1, min(10.0, float(optical_stack.get("m2Factor", 1.0) or 1.0)))
+    wvl_mm = wvl_nm * 1e-6
+
+    # Build surf_data_list: [curvature, thickness, n] per surface
+    surf_data_list = []
+    for i, s in enumerate(surfaces):
+        r = float(s.get("radius", 0) or 0)
+        curv = 1.0 / r if abs(r) > 1e-6 else 1e-6  # avoid div by zero
+        thick = float(s.get("thickness", 0) or 0)
+        n_after = get_n_after(surfaces, i, s, wvl_nm)
+        surf_data_list.append([curv, thick, n_after])
+
+    w0_entrance = (epd / 2.0) * 0.9
+    z_r_entrance = np.pi * (w0_entrance ** 2) / (wvl_mm * m2)
+    q = 1j * z_r_entrance
+
+    z_current = 0.0
+    n_list = [1.0] + [float(row[2]) for row in surf_data_list]
+
+    for i, row in enumerate(surf_data_list):
+        curv, thick, n = float(row[0]), float(row[1]), float(row[2])
+        n_before, n_after = n_list[i], n
+        r_mm = 1.0 / curv if abs(curv) > 1e-12 else 1e6
+        c_refract = (n_before - n_after) / (r_mm * n_after)
+        d_refract = n_before / n_after
+        q = _abcd_propagate(q, 1, 0, c_refract, d_refract)
+        if np.isinf(q):
+            break
+        q = _abcd_propagate(q, 1, thick, 0, 1)
+        z_current += thick
+
+    # Paraxial EFL for focus
+    efl = None
+    if len(surf_data_list) >= 2:
+        r1 = 1.0 / surf_data_list[0][0] if abs(surf_data_list[0][0]) > 1e-12 else 1e6
+        r2 = 1.0 / surf_data_list[1][0] if abs(surf_data_list[1][0]) > 1e-12 else 1e6
+        n = surf_data_list[0][2]
+        if abs(r1) > 1e-6 and abs(r2) > 1e-6:
+            phi = (n - 1) * (1 / r1 - 1 / r2)
+            if abs(phi) > 1e-12:
+                efl = 1.0 / phi
+    focus_z = z_current + (efl if efl and np.isfinite(efl) and efl > 0 else 50.0)
+    d_to_focus = focus_z - z_current
+    q_focus = _abcd_propagate(q, 1, d_to_focus, 0, 1)
+    w0_focus, z_r_focus = _q_to_waist_rayleigh(q_focus, wvl_mm)
+    if w0_focus <= 0 or z_r_focus <= 0:
+        w0_focus = w0_entrance * 0.5
+        z_r_focus = np.pi * (w0_focus ** 2) / (wvl_mm * m2)
+    waist_z = focus_z
+
+    envelope = []
+    for z in np.linspace(-50, 0, 10):
+        w = _beam_radius_at_z(w0_entrance, z_r_entrance, -float(z))
+        envelope.append([float(z), float(w)])
+
+    q_trace = 1j * z_r_entrance
+    z_trace = 0.0
+    for i, row in enumerate(surf_data_list):
+        curv, thick, n = float(row[0]), float(row[1]), float(row[2])
+        n_before, n_after = n_list[i], n_list[i + 1]
+        r_mm = 1.0 / curv if abs(curv) > 1e-12 else 1e6
+        c_r = (n_before - n_after) / (r_mm * n_after)
+        q_trace = _abcd_propagate(q_trace, 1, 0, c_r, n_before / n_after)
+        w_at = _beam_radius_from_q(q_trace, wvl_mm)
+        envelope.append([z_trace, w_at])
+        n_steps = max(3, int(thick / 2))
+        for k in range(1, n_steps + 1):
+            dz = thick * k / n_steps
+            q_prop = _abcd_propagate(q_trace, 1, dz, 0, 1)
+            w = _beam_radius_from_q(q_prop, wvl_mm)
+            envelope.append([z_trace + dz, w])
+        q_trace = _abcd_propagate(q_trace, 1, thick, 0, 1)
+        z_trace += thick
+
+    z_max = focus_z + 2 * z_r_focus
+    for z in np.linspace(z_trace, z_max, 50):
+        z_from_waist = z - waist_z
+        w = _beam_radius_at_z(w0_focus, z_r_focus, z_from_waist)
+        envelope.append([float(z), float(w)])
+    envelope.sort(key=lambda p: p[0])
+
+    return {
+        "beamEnvelope": envelope,
+        "spotSizeAtFocus": float(w0_focus),
+        "rayleighRange": float(z_r_focus),
+        "waistZ": float(waist_z),
+        "focusZ": float(focus_z),
+    }
+
+
+def run_quantum_polarization(optical_stack):
+    """
+    Stub for future Bloch sphere / polarization visualization.
+    Returns placeholder data.
+    """
+    return {
+        "polarizationState": [1, 0, 0],
+        "blochSphere": {"theta": 0, "phi": 0},
+        "placeholder": True,
+    }
+
+
+def run_kernel(kernel_name: str, payload: dict):
+    """
+    LeapOS kernel registry: call any kernel by name.
+    Enables agent to invoke run_trace, run_chromatic_shift, run_optimize_colors or future kernels.
+    payload: for 'trace' and 'optimize_colors' = optical_stack; for 'chromatic_shift' may include
+    wavelength_min_nm, wavelength_max_nm, wavelength_step_nm.
+    """
+    optical_stack = payload.get("optical_stack", payload)
+    kernels = {
+        "trace": run_trace,
+        "chromatic_shift": run_chromatic_shift,
+        "optimize_colors": run_optimize_colors,
+        "gaussian_beam": run_gaussian_beam,
+        "quantum_polarization": run_quantum_polarization,
+    }
+    fn = kernels.get(kernel_name)
+    if fn is None:
+        raise ValueError(f"Unknown kernel: {kernel_name}")
+    if kernel_name == "chromatic_shift":
+        return fn(
+            optical_stack,
+            wavelength_min_nm=payload.get("wavelength_min_nm", 400.0),
+            wavelength_max_nm=payload.get("wavelength_max_nm", 1100.0),
+            wavelength_step_nm=payload.get("wavelength_step_nm", 10.0),
+        )
+    return fn(optical_stack)
+
+
 def parse_import_file_content(content: str) -> list:
     """
     Parse LENS-X or optical JSON file content (string) into surfaces list.
