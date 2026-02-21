@@ -17,7 +17,7 @@ const SINGLET_LENSX = path.join(__dirname, 'fixtures', 'singlet.lensx')
 
 /** Wait for Pyodide boot overlay to disappear (can take 10–30s on first load). */
 async function waitForAppReady(page: import('@playwright/test').Page) {
-  await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 60000 })
+  await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|\[ READY \]/)).not.toBeVisible({ timeout: 60000 })
 }
 
 test.describe('Pyodide Trace Engine', () => {
@@ -112,7 +112,7 @@ test.describe('Pyodide Trace Engine — Fallback', () => {
   })
 
   test('graceful state when Pyodide worker fails to load', async ({ page }) => {
-    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 15000 })
+    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|\[ READY \]/)).not.toBeVisible({ timeout: 15000 })
 
     await page.getByTestId('nav-lens').click()
     await expect(page.getByTestId('nav-lens')).toHaveClass(/bg-white\/10/, { timeout: 5000 })

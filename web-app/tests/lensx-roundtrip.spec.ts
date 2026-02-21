@@ -38,7 +38,7 @@ test.describe('Lens-X Round-Trip', () => {
     await page.goto('/')
 
     // Wait for Pyodide boot overlay to disappear (when VITE_USE_PYODIDE=true)
-    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|Photon Leap/)).not.toBeVisible({ timeout: 60000 })
+    await expect(page.getByText(/Initializing WebAssembly|Downloading Optical|Establishing Local|\[ READY \]/)).not.toBeVisible({ timeout: 60000 })
 
     // 1. Navigate to System Editor
     await page.getByTestId('nav-system').click()
