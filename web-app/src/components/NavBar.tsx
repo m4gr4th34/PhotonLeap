@@ -3,10 +3,10 @@ import { Circle, Layers, BookOpen, Settings, FileCode, Beaker, Bot } from 'lucid
 export type NavTab = 'lens' | 'system' | 'coating' | 'agent' | 'info' | 'properties' | 'export'
 
 const navItems: { id: NavTab; label: string; icon: typeof Circle }[] = [
+  { id: 'agent', label: 'LeapOS', icon: Bot },
   { id: 'lens', label: 'Lens Designer', icon: Circle },
   { id: 'system', label: 'System Editor', icon: Layers },
   { id: 'coating', label: 'Coating Lab', icon: Beaker },
-  { id: 'agent', label: 'LeapOS', icon: Bot },
   { id: 'info', label: 'User Guide', icon: BookOpen },
   { id: 'properties', label: 'Properties', icon: Settings },
   { id: 'export', label: 'Export', icon: FileCode },

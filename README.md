@@ -11,7 +11,7 @@
   </a>
   <br /><br />
   <a href="https://m4gr4th34.github.io/PhotonLeap/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
-    🚀 PhotonLeap
+    🚀 Live Demo
   </a>
   <br /><br /><br />
 </div>
@@ -20,9 +20,9 @@
 
 # PhotonLeap — Optical Ray Tracing
 
-**PhotonLeap v2.0: The Zero-Install Revolution. Physics at the Edge.**
+**PhotonLeap v3.0: AI-First Optical Design. Physics at the Edge.**
 
-Open-source, license-free optical design software. Design singlet lenses, run ray traces, and visualize performance metrics—with or without a backend. The Python physics engine now runs **directly in your browser** via Pyodide (WebAssembly).
+Open-source, license-free optical design software built around **LeapOS**—an AI-powered command deck that drives optical design through natural language. Describe your intent; the agent proposes surface changes, validates via ray trace, and iterates until the design meets your specs. The Python physics engine runs **directly in your browser** via Pyodide (WebAssembly), with or without a backend.
 
 ![Lens Designer screenshot](docs/screenshot.png)
 
@@ -45,7 +45,9 @@ Open-source, license-free optical design software. Design singlet lenses, run ra
 
 PhotonLeap supports a **zero-install** architecture: the Python physics engine runs in the browser via Pyodide (WebAssembly). No backend server required.
 
-> 📄 **See [RELEASE_NOTES.md](RELEASE_NOTES.md)** for the full v2.0 announcement—*The Photon Leap*.
+> 📄 **See [RELEASE_NOTES.md](RELEASE_NOTES.md)** for the full v3.0 announcement—*AI-First Optical Design*.
+
+**Launch sequence** — In standalone (Pyodide) mode, the app displays a boot overlay while the WebAssembly runtime loads: *Initializing WebAssembly Runtime… Downloading Optical Physics Libraries… Establishing Local Memory Bridge… Photon Leap V3.0 Active.* Then the main interface appears with the **Live Demo** ready.
 
 | Mode | Build | Trace Engine |
 |------|-------|--------------|
@@ -92,6 +94,7 @@ npx serve dist
 ## Project Goals
 
 - Deliver a modern, free optical design tool for students, researchers, and small teams
+- Put **AI agents at the center** — LeapOS is the primary interface; describe your optical intent in plain language and let the agent design, trace, and iterate
 - Bridge laser and ultrafast optics (Gaussian beams, dispersion) with manufacturing-grade reliability analysis
 - Provide a clean workflow from design through trace to ISO 10110 export—without vendor lock-in
 
@@ -193,6 +196,7 @@ Then open **http://localhost:5173**
 
 Once you're up and running, here's what you get:
 
+- **LeapOS AI agents** — Natural-language optical design. Describe a beam expander, achromat, or laser focus system; the agent proposes geometry, runs ray traces, and self-corrects until RMS meets your threshold. Claude, GPT-4o, o1, and DeepSeek supported; keys stored locally.
 - **High-precision ray tracing** — Sequential ray optics via rayoptics; spot diagrams, RMS radius, and focus metrics at the image plane
 - **Real-time SVG viewport** — Interactive cross-section with zoom, pan, and through-focus scan line; dynamic optical_stack management
 - **Gaussian beam propagation** — Beam waist (w₀), Rayleigh range (z_R), M² analysis; ABCD matrix envelope visualization
@@ -225,6 +229,7 @@ PhotonLeap/
 
 ### Frontend (React + Vite)
 
+- **LeapOS (AI Command Deck)** — First tab; natural-language prompts drive optical design. Choose Claude, GPT-4o, o1, or DeepSeek; the agent proposes surface changes and validates via ray trace. API keys stored locally in the Uplink Modal.
 - **Lens Designer** — Canvas with optical viewport; add/edit/reorder surfaces, run trace
 - **System Editor** — Table of surfaces (radius, thickness, material, diameter)
 - **System Properties** — Entrance pupil, wavelengths, field angles, ray count
@@ -263,5 +268,5 @@ See [README_API.md](README_API.md) for endpoint specs and response format.
 ## 🤝 Contributors Welcome
 
 - **Pythonistas** — Optimize the browser-native trace engine in `web-app/public/pyodide/trace.py`.
-- **Frontend engineers** — Refine the **Neural Link** (Web Worker bridge) in `web-app/src/lib/pythonBridge.ts`.
+- **Frontend engineers** — Refine the **Neural Link** (Web Worker bridge) in `web-app/src/lib/pythonBridge.ts` and the LeapOS agent orchestration in `web-app/src/lib/agentOrchestrator.ts`.
 - **Lens-X** — The interchange standard holds the ecosystem together; see `LENS_X_SPEC.md`.

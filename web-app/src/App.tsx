@@ -1,4 +1,4 @@
-/** MacOptics v2.0 — GitHub Pages deploy */
+/** MacOptics v3.0 — GitHub Pages deploy */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { NavBar, type NavTab } from './components/NavBar'
 import { isPyodideEnabled, waitForPyodideReady } from './lib/pythonBridge'
@@ -81,7 +81,7 @@ const BOOT_MESSAGES = [
   '[ SYSTEM ] Initializing WebAssembly Runtime...',
   '[ CORE ] Downloading Optical Physics Libraries (NumPy)...',
   '[ NEURAL ] Establishing Local Memory Bridge...',
-  '[ READY ] Photon Leap V2.0 Active.',
+  '[ READY ] Photon Leap V3.0 Active.',
 ] as const
 
 function NeuralLinkBootSequence({ onReady }: { onReady: () => void }) {
@@ -154,7 +154,7 @@ function NeuralLinkBootSequence({ onReady }: { onReady: () => void }) {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<NavTab>('lens')
+  const [activeTab, setActiveTab] = useState<NavTab>('agent')
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null)
   const [selectedSurfaceId, setSelectedSurfaceId] = useState<string | null>(null)
   const [highlightedMetric, setHighlightedMetric] = useState<HighlightedMetric>(null)
