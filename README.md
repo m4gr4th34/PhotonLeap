@@ -1,26 +1,26 @@
 <div align="center">
 
-[![Open in Browser](https://img.shields.io/badge/Open_in_Browser-Live_Demo-22D3EE?style=for-the-badge&logo=google-chrome&logoColor=white&labelColor=6366F1)](https://m4gr4th34.github.io/MacOpticsApp/)
+[![Open in Browser](https://img.shields.io/badge/Open_in_Browser-PhotonLeap-22D3EE?style=for-the-badge&logo=google-chrome&logoColor=white&labelColor=6366F1)](https://m4gr4th34.github.io/PhotonLeap/)
 
 **No installation required · Works in all modern browsers** (Chrome, Firefox, Safari, Edge)
 
 <br />
 
-  <a href="https://m4gr4th34.github.io/MacOpticsApp/">
-    <img src="assets/banner.png" alt="MacOptics" width="100%" style="max-width: 100%;" />
+  <a href="https://m4gr4th34.github.io/PhotonLeap/">
+    <img src="assets/banner.png" alt="PhotonLeap" width="100%" style="max-width: 100%;" />
   </a>
   <br /><br />
-  <a href="https://m4gr4th34.github.io/MacOpticsApp/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
-    🚀 Open Live Demo
+  <a href="https://m4gr4th34.github.io/PhotonLeap/" style="display: inline-block; background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%); color: white; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-decoration: none; border-radius: 12px; padding: 16px 32px; margin: 20px 0; font-size: 1.1em; box-shadow: 0 4px 14px rgba(34, 211, 238, 0.4);">
+    🚀 PhotonLeap
   </a>
   <br /><br /><br />
 </div>
 
 <br /><br />
 
-# MacOptics — Optical Ray Tracing
+# PhotonLeap — Optical Ray Tracing
 
-**MacOptics v2.0: The Zero-Install Revolution. Physics at the Edge.**
+**PhotonLeap v2.0: The Zero-Install Revolution. Physics at the Edge.**
 
 Open-source, license-free optical design software. Design singlet lenses, run ray traces, and visualize performance metrics—with or without a backend. The Python physics engine now runs **directly in your browser** via Pyodide (WebAssembly).
 
@@ -43,7 +43,7 @@ Open-source, license-free optical design software. Design singlet lenses, run ra
 
 ## Zero-Install (Pyodide) Mode
 
-MacOptics supports a **zero-install** architecture: the Python physics engine runs in the browser via Pyodide (WebAssembly). No backend server required.
+PhotonLeap supports a **zero-install** architecture: the Python physics engine runs in the browser via Pyodide (WebAssembly). No backend server required.
 
 > 📄 **See [RELEASE_NOTES.md](RELEASE_NOTES.md)** for the full v2.0 announcement—*The Photon Leap*.
 
@@ -70,7 +70,7 @@ Open `dist/index.html` in a browser (or serve via `npx vite preview`). The Pyodi
 
 ## 🛠️ For Developers
 
-**Help us push the boundaries of browser-based optical engineering.** MacOptics uses a hybrid React–Pyodide architecture: the Python physics engine runs in a Web Worker and communicates with the UI via `postMessage`. New contributors should read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the "Neural Link" architecture, file map (Brain/Nerves/Body), and guidelines for Python changes, type safety, and testing.
+**Help us push the boundaries of browser-based optical engineering.** PhotonLeap uses a hybrid React–Pyodide architecture: the Python physics engine runs in a Web Worker and communicates with the UI via `postMessage`. New contributors should read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the "Neural Link" architecture, file map (Brain/Nerves/Body), and guidelines for Python changes, type safety, and testing.
 
 ### Development Workflow (Pyodide Mode)
 
@@ -99,7 +99,7 @@ npx serve dist
 
 ## 🚀 Powered by Lens-X
 
-MacOptics uses **Lens-X**, a physics-aware optical interchange format that goes beyond legacy ISO 10110 flat drawings. Instead of a static blueprint, Lens-X embeds geometry, glass chemistry (Sellmeier), coating data, and manufacturing tolerances in a single JSON file—enabling a true **Digital Twin** of your optical system.
+PhotonLeap uses **Lens-X**, a physics-aware optical interchange format that goes beyond legacy ISO 10110 flat drawings. Instead of a static blueprint, Lens-X embeds geometry, glass chemistry (Sellmeier), coating data, and manufacturing tolerances in a single JSON file—enabling a true **Digital Twin** of your optical system.
 
 | Aspect | Legacy ISO 10110 | Lens-X (Digital Twin) |
 |--------|------------------|------------------------|
@@ -144,7 +144,7 @@ The **Coating Lab** is a professional-grade suite for managing thin-film perform
 
 | User Type | Steps |
 |-----------|-------|
-| **Non-tech** | 1. Download `macoptics-standalone.zip`<br>2. Extract the folder<br>3. Run **`start-mac.command`** (Mac) or **`start-windows.bat`** (Windows)<br>4. Browser opens at http://localhost:8080 — no extra install needed (uses built-in Python) |
+| **Non-tech** | 1. Download `photonleap-standalone.zip`<br>2. Extract the folder<br>3. Run **`start-mac.command`** (Mac) or **`start-windows.bat`** (Windows)<br>4. Browser opens at http://localhost:8080 — no extra install needed (uses built-in Python) |
 | **Zero-install (standalone)** | 1. `cd web-app && npm run build:standalone`<br>2. `cd dist && npx serve .` or `python -m http.server`<br>3. Open the URL (e.g. `http://localhost:3000`) |
 | **Full stack (backend + frontend)** | 1. Backend: `uvicorn backend.main:app --reload --port 8000`<br>2. Frontend: `cd web-app && npm run dev`<br>3. Open **http://localhost:5173** |
 
@@ -206,7 +206,7 @@ Once you're up and running, here's what you get:
 ## Architecture
 
 ```
-MacOpticsApp/
+PhotonLeap/
 ├── backend/                 # FastAPI Python backend
 │   ├── main.py              # API routes, CORS, request models
 │   ├── trace_service.py     # Ray-tracing logic (rayoptics)
