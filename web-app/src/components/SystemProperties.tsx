@@ -58,10 +58,13 @@ export function SystemProperties({
   }
 
   const addFieldAngle = () => {
-    onSystemStateChange((prev) => ({
-      ...prev,
-      fieldAngles: [...prev.fieldAngles, config.defaults.defaultFieldAngle],
-    }))
+    onSystemStateChange((prev) => {
+      if (prev.fieldAngles.length >= config.maxFieldAngles) return prev
+      return {
+        ...prev,
+        fieldAngles: [...prev.fieldAngles, config.defaults.defaultFieldAngle],
+      }
+    })
   }
 
   const removeFieldAngle = (i: number) => {
@@ -168,9 +171,14 @@ export function SystemProperties({
               </div>
             ))}
           </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Maximum of {config.maxFieldAngles} field angles allowed for this simulation.
+          </p>
           <button
             onClick={addFieldAngle}
-            className="mt-2 w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-white/20 text-slate-400 hover:text-cyan-electric hover:border-cyan-electric/50 transition-colors text-sm"
+            disabled={systemState.fieldAngles.length >= config.maxFieldAngles}
+            title={systemState.fieldAngles.length >= config.maxFieldAngles ? 'Maximum of 3 field angles allowed for this simulation.' : 'Add field angle'}
+            className="mt-2 w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-white/20 text-slate-400 hover:text-cyan-electric hover:border-cyan-electric/50 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-slate-400 disabled:hover:border-white/20"
           >
             <Plus className="w-4 h-4" />
             Add field angle

@@ -5,6 +5,7 @@
 
 import type { TraceResponse } from '../api/trace'
 import type { Surface } from '../types/system'
+import { config } from '../config'
 
 type TracePayload = {
   surfaces: Array<Record<string, unknown>>
@@ -38,6 +39,13 @@ async function ensureWorker(): Promise<Worker> {
   }
   initPromise = (async () => {
     worker = new Worker(getWorkerUrl(), { type: 'classic' })
+    worker.addEventListener('message', (e: MessageEvent) => {
+      if (e.data?.type === 'log') {
+        ;(e.data.lines as string[] || []).forEach((line) =>
+          console.log('%c[Python]', 'color: #4CAF50', line)
+        )
+      }
+    })
     await new Promise<void>((resolve, reject) => {
       const onMsg = (e: MessageEvent) => {
         if (e.data?.type === 'ready') {
@@ -89,7 +97,7 @@ export async function traceViaPyodide(optical_stack: {
     })),
     entrancePupilDiameter: optical_stack.entrancePupilDiameter,
     wavelengths: optical_stack.wavelengths,
-    fieldAngles: optical_stack.fieldAngles,
+    fieldAngles: (optical_stack.fieldAngles ?? [0]).slice(0, config.maxFieldAngles),
     numRays: optical_stack.numRays,
     focusMode: optical_stack.focusMode ?? 'On-Axis',
     m2Factor: optical_stack.m2Factor ?? 1.0,

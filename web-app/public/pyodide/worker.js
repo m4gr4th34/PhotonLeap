@@ -27,6 +27,10 @@ self.onmessage = async (e) => {
   try {
     if (type === 'init') {
       pyodide = await loadPyodide({ indexURL: PYODIDE_CDN });
+      pyodide.setStdout({
+        batched: (msg) =>
+          self.postMessage({ type: 'log', lines: msg ? [String(msg).trimEnd()] : [] }),
+      });
       await pyodide.loadPackage(['numpy']);
       const traceScript = await loadTraceScript();
       await pyodide.runPythonAsync(traceScript);
@@ -50,6 +54,17 @@ __result__
       );
       const result = await Promise.race([runTrace, timeout]);
       const jsResult = result?.toJs ? result.toJs() : (result ?? {});
+      const refLog = jsResult?.refractionLog;
+      if (refLog && Array.isArray(refLog) && refLog.length > 0) {
+        const lines = refLog.map((e) => {
+          const ui = e.ui_surf ?? e.surf + 1;
+          const z = e.z_vertex ?? 0;
+          const mat = e.mat_name ?? '?';
+          const n2 = e.n2 ?? 0;
+          return `MATCH AUDIT | UI Surface ${ui} | Pos: ${Number(z).toFixed(2)}mm | Material: ${mat} | n_after: ${Number(n2).toFixed(4)}`;
+        });
+        self.postMessage({ type: 'log', lines: ['[Trace refraction audit]', ...lines] });
+      }
       self.postMessage({ type: 'trace', id, result: jsResult });
       return;
     }

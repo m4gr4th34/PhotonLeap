@@ -292,7 +292,15 @@ function generateRays(
   return rays
 }
 
-/** Compute cumulative Z positions for surfaces (mm) */
+/** Compute cumulative Z positions for surfaces (mm). Must match trace.py cumulative_z exactly.
+ * z[i] = sum(thicknesses[0..i-1]). Surface 0 vertex at z=0.
+ *
+ * INDEX MAPPING (UI 1-based <-> trace.py 0-based). MUST stay in sync with trace.py.
+ *   UI Surface 1 = index 0 = Front of Lens 1 (z=0)
+ *   UI Surface 2 = index 1 = Back of Lens 1
+ *   UI Surface 3 = index 2 = Front of Lens 2
+ *   UI Surface 4 = index 3 = Back of Lens 2
+ * thickness[i] = distance from surface i to surface i+1. */
 function computeCumulativeZ(surfaces: { thickness: number }[]): number[] {
   const z: number[] = []
   let cum = 0
@@ -306,7 +314,8 @@ function computeCumulativeZ(surfaces: { thickness: number }[]): number[] {
 /**
  * Auto-Zoom: compute scale and offset so the entire optical system is centered and visible.
  * Uses Z_total (total length) and D_max (max diameter) from surfaces.
- * Recomputes whenever surfaces or thicknesses change.
+ * scale = SVG units per mm. Conversion: SVG_x = z_mm * scale + xOffset; z_mm = (SVG_x - xOffset) / scale.
+ * Rays, Diamond, and HUD cursor all use this same transform.
  */
 function computeViewTransform(
   traceResult: TraceResult | null,
@@ -659,6 +668,16 @@ export function OpticalViewport({
         if (res.terminationLog?.length) {
           console.warn('[Trace termination log]', res.terminationLog)
         }
+        if (res.refractionLog?.length) {
+          res.refractionLog.forEach((e) => {
+            const mat = (e as { mat_name?: string }).mat_name ?? '?'
+            const n2 = e.n2 ?? 0
+            if (mat.toLowerCase() === 'air' && Math.abs(n2 - 1) > 1e-6) {
+              console.warn('[Trace] Air with n_after≠1:', e)
+            }
+          })
+          console.log('[Trace refraction audit] MATCH AUDIT per surface:', res.refractionLog)
+        }
         const rawRays = res.rays ?? []
         // Ensure rays go left-to-right (object to image): sort by z ascending.
         // If already sorted, this is a no-op; if reversed (image-to-object), this fixes it.
@@ -907,6 +926,7 @@ export function OpticalViewport({
 
   const totalRays = raysByField.reduce((n, g) => n + g.rays.length, 0)
 
+  // Diamond = visual crossing. MUST use bestFocusZ from Python trace — no secondary frontend calculation.
   const bestFocusZ = traceResult?.bestFocusZ
   const bestFocusSvgX = bestFocusZ != null ? bestFocusZ * scale + xOffset : null
 
@@ -1016,7 +1036,8 @@ export function OpticalViewport({
         }
       }
 
-      const zCursorPos = (scanSvgX - xOffset) / scale
+      // Definitive: optical Z (mm) = (SVG X - xOffset) / scale. 1 mm in Python = scale units in SVG.
+  const zCursorPos = (scanSvgX - xOffset) / scale
       if (import.meta.env.DEV) {
         console.log('[HUD Snap]', snapType, '| Z=', zCursorPos.toFixed(3), 'mm')
       }
@@ -1084,6 +1105,8 @@ export function OpticalViewport({
     : null
 
   const showHud = scanHud.isHovering || showPersistentHud
+  // HUD index mapping: when snapped to surface i, scanHud.cursorZ = zPositions[i], scanHud.snappedSurfaceIndex = i.
+  // hudMetrics = interpolateMetricsAtZ(sweep, cursorZ) — metrics at that Z, NOT from a different index.
   const hudMetrics = scanHud.isHovering ? scanMetrics : persistentMetrics
   const hudZ = scanHud.isHovering ? scanHud.cursorZ : persistentHudZ
   const isPersistentHud = showPersistentHud && !scanHud.isHovering
@@ -1203,7 +1226,7 @@ export function OpticalViewport({
           <div className="flex items-center gap-2">
             <span className="text-slate-400 text-sm whitespace-nowrap">Field</span>
             <div className="flex items-center gap-1.5">
-              {(systemState.fieldAngles || [0]).slice(0, config.rayColors.length).map((_, fIdx) => {
+              {(systemState.fieldAngles || [0]).slice(0, config.maxFieldAngles).map((_, fIdx) => {
                 const color = config.rayColors[Math.min(fIdx, config.rayColors.length - 1)]
                 const isActive = fieldFilter === fIdx
                 return (
@@ -1758,7 +1781,7 @@ export function OpticalViewport({
               transition={{ duration: 0.3, ease: 'easeOut' }}
             >
               <div className="flex flex-col gap-1.5">
-                {(systemState.fieldAngles || [0]).slice(0, config.rayColors.length).map((angle, idx) => {
+                {(systemState.fieldAngles || [0]).slice(0, config.maxFieldAngles).map((angle, idx) => {
                   const color = config.rayColors[Math.min(idx, config.rayColors.length - 1)]
                   return (
                     <div key={idx} className="flex items-center gap-2 text-xs text-slate-300">
@@ -1840,18 +1863,20 @@ export function OpticalViewport({
               ) : (
                 <>
               {scanHud.snappedSurfaceIndex != null && !isPersistentHud && (() => {
-                const s = surfaces[scanHud.snappedSurfaceIndex!]
+                const internalIdx = scanHud.snappedSurfaceIndex!
+                const uiSurf = internalIdx + 1  // HUD: UI Surface 1 = internal index 0
+                const s = surfaces[internalIdx]
                 const label = s
                   ? s.description || s.material || (s.type === 'Glass' ? 'Lens' : 'Air')
-                  : `Surface ${scanHud.snappedSurfaceIndex! + 1}`
+                  : `Surface ${uiSurf}`
                 return (
                   <div className="text-[10px] font-medium text-white/90 mb-1.5 -mt-0.5">
-                    Surface {scanHud.snappedSurfaceIndex! + 1}: {label}
+                    Surface {uiSurf}: {label}
                   </div>
                 )
               })()}
               <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-xs">
-                <HudRow label="Z:" value={`${hudMetrics ? hudMetrics.z.toFixed(2) : hudZ.toFixed(2)} mm`} metricId="z" highlightedMetric={highlightedMetric} />
+                <HudRow label="Z:" value={`${hudZ.toFixed(2)} mm`} metricId="z" highlightedMetric={highlightedMetric} />
                 {hudMetrics?.rmsPerField && hudMetrics.rmsPerField.length > 0 ? (
                   <>
                     {hudMetrics.rmsPerField.map((rms, fi) => {

@@ -53,6 +53,17 @@ export type TraceResponse = {
     wvl_nm?: number
     extra?: Record<string, unknown>
   }>
+  /** MATCH AUDIT: n1, n2, mat_name per surface. Air must have n_after=1.0. */
+  refractionLog?: Array<{
+    surf: number
+    ui_surf?: number
+    z_vertex: number
+    thickness_to_next?: number
+    n1: number
+    n2: number
+    eta?: number
+    mat_name?: string
+  }>
   error?: string
 }
 
@@ -72,6 +83,7 @@ export async function traceOpticalStack(optical_stack: {
   }
   const payload = {
     ...optical_stack,
+    fieldAngles: (optical_stack.fieldAngles ?? [0]).slice(0, config.maxFieldAngles),
     focusMode: optical_stack.focusMode ?? 'On-Axis',
     m2Factor: optical_stack.m2Factor ?? 1.0,
     surfaces: optical_stack.surfaces.map((s) => ({

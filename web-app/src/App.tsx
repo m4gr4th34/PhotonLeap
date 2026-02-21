@@ -54,7 +54,9 @@ function loadLastDesign(): SystemState | null {
       surfaces,
       entrancePupilDiameter: Number(optical_stack.entrancePupilDiameter) || config.defaults.entrancePupilDiameter,
       wavelengths: Array.isArray(optical_stack.wavelengths) ? optical_stack.wavelengths.map(Number) : DEFAULT_SYSTEM_STATE.wavelengths,
-      fieldAngles: Array.isArray(optical_stack.fieldAngles) ? optical_stack.fieldAngles.map(Number) : DEFAULT_SYSTEM_STATE.fieldAngles,
+      fieldAngles: Array.isArray(optical_stack.fieldAngles)
+        ? optical_stack.fieldAngles.map(Number).slice(0, config.maxFieldAngles)
+        : DEFAULT_SYSTEM_STATE.fieldAngles,
       numRays: Number(optical_stack.numRays) || 9,
       focusMode: optical_stack.focusMode === 'Balanced' ? 'Balanced' : 'On-Axis',
       m2Factor: Math.max(0.1, Math.min(10, Number(optical_stack.m2Factor) || 1)),
@@ -194,8 +196,12 @@ function App() {
       setSystemState((prev) => {
         const next =
           typeof update === 'function' ? update(prev) : { ...prev, ...update }
-        const perf = computePerformance(next)
-        return { ...next, ...perf }
+        const truncated = {
+          ...next,
+          fieldAngles: (next.fieldAngles ?? [0]).slice(0, config.maxFieldAngles),
+        }
+        const perf = computePerformance(truncated)
+        return { ...truncated, ...perf }
       })
     },
     []
