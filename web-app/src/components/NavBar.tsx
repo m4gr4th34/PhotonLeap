@@ -23,7 +23,7 @@ export function NavBar({ activeTab, onTabChange, loadedFileName }: NavBarProps) 
       <nav className="flex items-center gap-1 px-6 py-3">
         <div className="flex items-center gap-4 mr-8">
           <span className="text-cyan-electric font-semibold text-lg">
-            Lens Designer
+            Photon Leap
           </span>
           {loadedFileName && (
             <span className="text-slate-400 text-sm font-medium">
