@@ -48,7 +48,7 @@ function MaterialCombobox({
   fallbackN,
 }: {
   value: string
-  onChange: (material: string, n?: number) => void
+  onChange: (material: string, n?: number, sellmeierCoefficients?: { B: number[]; C: number[] }) => void
   onClick?: (e: React.MouseEvent) => void
   materials: MaterialOption[]
   wavelengthNm: number
@@ -127,7 +127,12 @@ function MaterialCombobox({
   }, [query, value, isOpen])
 
   const handleSelect = (m: MaterialOption) => {
-    onChange(m.name, m.n)
+    const coeffs = m.coefficients as { B?: number[]; C?: number[] } | undefined
+    const sellmeier =
+      coeffs && Array.isArray(coeffs.B) && Array.isArray(coeffs.C) && coeffs.B.length >= 3 && coeffs.C.length >= 3
+        ? { B: coeffs.B, C: coeffs.C }
+        : undefined
+    onChange(m.name, m.n, sellmeier)
     setQuery('')
     setIsOpen(false)
   }
@@ -571,6 +576,30 @@ export function SystemEditor({
   useEffect(() => {
     fetchCoatings().then(setCoatings)
   }, [])
+
+  useEffect(() => {
+    if (glassMaterials.length <= 5) return
+    const needsHydration = surfaces.some(
+      (s) =>
+        s.type === 'Glass' &&
+        s.material &&
+        s.material !== 'Air' &&
+        !(s.sellmeierCoefficients?.B && s.sellmeierCoefficients.B.length >= 3)
+    )
+    if (!needsHydration) return
+    const matByName = new Map(glassMaterials.map((m) => [m.name.toLowerCase(), m]))
+    const updates = surfaces.map((s) => {
+      if (s.type !== 'Glass' || !s.material || s.material === 'Air') return s
+      if (s.sellmeierCoefficients?.B && s.sellmeierCoefficients.B.length >= 3) return s
+      const mat = matByName.get(s.material.toLowerCase())
+      const coeffs = mat?.coefficients as { B?: number[]; C?: number[] } | undefined
+      if (!coeffs?.B || !coeffs?.C || coeffs.B.length < 3) return s
+      return { ...s, sellmeierCoefficients: { B: coeffs.B, C: coeffs.C } }
+    })
+    if (updates.some((u, i) => u !== surfaces[i])) {
+      onSystemStateChange((prev) => ({ ...prev, surfaces: updates }))
+    }
+  }, [glassMaterials, surfaces, onSystemStateChange])
 
   useEffect(() => {
     if (!toastMessage) return
@@ -1025,13 +1054,22 @@ export function SystemEditor({
                     materials={glassMaterials}
                     wavelengthNm={systemState.wavelengths[0] ?? 587.6}
                     fallbackN={s.refractiveIndex}
-                    onChange={(material, n) =>
+                    onChange={(material, n, sellmeierCoefficients) => {
+                      const matOpt = glassMaterials.find((m) => m.name.toLowerCase() === material.toLowerCase())
+                      const coeffs =
+                        sellmeierCoefficients ??
+                        (matOpt?.coefficients as { B?: number[]; C?: number[] } | undefined)
+                      const sm =
+                        coeffs && Array.isArray(coeffs.B) && Array.isArray(coeffs.C)
+                          ? { B: coeffs.B, C: coeffs.C }
+                          : undefined
                       updateSurface(s.id, {
                         material,
                         ...(n != null && { refractiveIndex: n }),
+                        sellmeierCoefficients: sm,
                         type: material === 'Air' ? 'Air' : 'Glass',
                       })
-                    }
+                    }}
                     onClick={(e) => e.stopPropagation()}
                   />
                 </td>

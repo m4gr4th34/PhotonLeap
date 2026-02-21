@@ -172,6 +172,52 @@ export async function chromaticShiftViaPyodide(optical_stack: {
   })
 }
 
+export async function optimizeColorsViaPyodide(optical_stack: {
+  surfaces: Surface[]
+  entrancePupilDiameter: number
+  wavelengths: number[]
+  fieldAngles: number[]
+  numRays: number
+  focusMode?: string
+  m2Factor?: number
+}): Promise<{ recommended_glass: string; estimated_lca_reduction: number }> {
+  const w = await ensureWorker()
+  const payload = {
+    surfaces: optical_stack.surfaces.map((s) => ({
+      id: s.id,
+      type: s.type,
+      radius: s.radius,
+      thickness: s.thickness,
+      refractiveIndex: s.refractiveIndex,
+      diameter: s.diameter,
+      material: s.material,
+      description: s.description,
+      sellmeierCoefficients: s.sellmeierCoefficients,
+    })),
+    entrancePupilDiameter: optical_stack.entrancePupilDiameter,
+    wavelengths: optical_stack.wavelengths,
+    fieldAngles: (optical_stack.fieldAngles ?? [0]).slice(0, config.maxFieldAngles),
+    numRays: optical_stack.numRays,
+    focusMode: optical_stack.focusMode ?? 'On-Axis',
+    m2Factor: optical_stack.m2Factor ?? 1.0,
+  }
+  const id = `optimize-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve, reject) => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'optimize-colors' && e.data.id === id) {
+        w.removeEventListener('message', onMsg)
+        if (e.data.error) {
+          reject(new Error(e.data.error))
+        } else {
+          resolve((e.data.result ?? { recommended_glass: '', estimated_lca_reduction: 0 }) as { recommended_glass: string; estimated_lca_reduction: number })
+        }
+      }
+    }
+    w.addEventListener('message', onMsg)
+    w.postMessage({ type: 'optimize-colors', id, payload })
+  })
+}
+
 export function isPyodideEnabled(): boolean {
   return typeof import.meta.env.VITE_USE_PYODIDE !== 'undefined' &&
     import.meta.env.VITE_USE_PYODIDE === 'true'

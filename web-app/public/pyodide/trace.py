@@ -106,6 +106,8 @@ def _refractive_index_at_wavelength(wvl_nm, material_name, n_fallback):
     if entry is None:
         if key.startswith("n-"):
             entry = _GLASS_LIBRARY.get(key[2:])
+        if entry is None and key == "n-bk":
+            entry = _GLASS_LIBRARY.get("n-bk7")
         if entry is None:
             return n_fallback
     if isinstance(entry, str):
@@ -651,16 +653,115 @@ def run_chromatic_shift(optical_stack, wavelength_min_nm=400.0, wavelength_max_n
         if not rays:
             result.append({"wavelength": float(wvl_nm), "focus_shift": float("nan")})
             continue
-        best_z = last_vertex_z
+        z_sweep = np.linspace(z_sweep_min, min(z_sweep_max, z_cur + 100.0), 200)
+        rms_vals = [_rms_at_z(rays, z) for z in z_sweep]
+        best_idx = 0
         best_rms = float("inf")
-        for z in np.linspace(z_sweep_min, min(z_sweep_max, z_cur + 100.0), 80):
-            rms = _rms_at_z(rays, z)
-            if rms is not None and rms < best_rms:
-                best_rms = rms
-                best_z = z
+        for i, r in enumerate(rms_vals):
+            if r is not None and r < best_rms:
+                best_rms = r
+                best_idx = i
+        z_window_lo = float(z_sweep[max(0, best_idx - 1)])
+        z_window_hi = float(z_sweep[min(len(z_sweep) - 1, best_idx + 1)])
+        phi = 0.618033988749895
+        tol = 1e-6
+        a, b = z_window_lo, z_window_hi
+        while (b - a) > tol:
+            c = b - (b - a) * phi
+            d = a + (b - a) * phi
+            rc = _rms_at_z(rays, c)
+            rd = _rms_at_z(rays, d)
+            if rc is None:
+                rc = float("inf")
+            if rd is None:
+                rd = float("inf")
+            if rc < rd:
+                b = d
+            else:
+                a = c
+        best_z = 0.5 * (a + b)
         bfl = best_z - last_vertex_z if np.isfinite(best_rms) else float("nan")
         result.append({"wavelength": float(wvl_nm), "focus_shift": float(bfl)})
     return result
+
+
+def run_optimize_colors(optical_stack):
+    """
+    Find second glass to minimize LCA in doublet. Uses run_chromatic_shift.
+    Returns { recommended_glass: str, estimated_lca_reduction: float }.
+    """
+    surfaces = optical_stack.get("surfaces", [])
+    if len(surfaces) < 2:
+        return {"recommended_glass": "", "estimated_lca_reduction": 0.0}
+    s0, s1 = surfaces[0], surfaces[1]
+    mat1 = str(s0.get("material") or "").strip().lower()
+    if not mat1 or mat1 == "air":
+        return {"recommended_glass": "", "estimated_lca_reduction": 0.0}
+    stack = dict(optical_stack)
+    stack["surfaces"] = list(surfaces)
+    stack["numRays"] = max(2, int(optical_stack.get("numRays", 9) or 9))
+    singlet_result = run_chromatic_shift(
+        stack, wavelength_min_nm=486.0, wavelength_max_nm=656.0, wavelength_step_nm=170.0
+    )
+    bfl_486_s = next((p["focus_shift"] for p in singlet_result if abs(p["wavelength"] - 486) < 5), float("nan"))
+    bfl_656_s = next((p["focus_shift"] for p in singlet_result if abs(p["wavelength"] - 656) < 5), float("nan"))
+    if not (np.isfinite(bfl_486_s) and np.isfinite(bfl_656_s)):
+        return {"recommended_glass": "", "estimated_lca_reduction": 0.0}
+    lca_singlet = abs(bfl_486_s - bfl_656_s)
+    t1 = float(s0.get("thickness", 5) or 5)
+    t2 = t1 * 0.5
+    r2 = float(s1.get("radius", 0) or 0)
+    diam = float(s0.get("diameter", 25) or 25)
+    _DISPLAY_NAMES = {
+        "fused silica": "Fused Silica", "silica": "Fused Silica", "fused-silica": "Fused Silica",
+        "calcium fluoride": "Calcium Fluoride", "caf2": "Calcium Fluoride",
+        "magnesium fluoride": "Magnesium Fluoride", "mgf2": "Magnesium Fluoride",
+    }
+    def _canonical_name(k):
+        return _DISPLAY_NAMES.get(k, k.upper().replace("-", "-"))
+    candidates = []
+    seen = set()
+    for k, v in _GLASS_LIBRARY.items():
+        if isinstance(v, str):
+            continue
+        if v.get("formula") != "sellmeier" or k == "air":
+            continue
+        coeffs = v.get("coeffs", {})
+        if "B" not in coeffs or "C" not in coeffs:
+            continue
+        name = _canonical_name(k)
+        if name.lower() == mat1 or name in seen:
+            continue
+        seen.add(name)
+        candidates.append((k, v, name))
+    best_glass = ""
+    best_lca = float("inf")
+    for key, entry, glass_name in candidates:
+        cement_sellmeier = {"B": list(entry["coeffs"]["B"]), "C": list(entry["coeffs"]["C"])}
+        doublet_surfaces = [
+            dict(s0, thickness=t1),
+            {"id": "cement", "type": "Glass", "radius": r2, "thickness": t2, "material": glass_name, "refractiveIndex": 1.6, "diameter": diam, "sellmeierCoefficients": cement_sellmeier},
+            {"id": "s2", "type": "Air", "radius": r2, "thickness": float(s1.get("thickness", 0) or 0), "material": "Air", "refractiveIndex": 1.0, "diameter": diam},
+        ]
+        doublet_stack = dict(stack)
+        doublet_stack["surfaces"] = doublet_surfaces
+        try:
+            doublet_result = run_chromatic_shift(
+                doublet_stack, wavelength_min_nm=486.0, wavelength_max_nm=656.0, wavelength_step_nm=170.0
+            )
+            bfl_486 = next((p["focus_shift"] for p in doublet_result if abs(p["wavelength"] - 486) < 5), float("nan"))
+            bfl_656 = next((p["focus_shift"] for p in doublet_result if abs(p["wavelength"] - 656) < 5), float("nan"))
+            if np.isfinite(bfl_486) and np.isfinite(bfl_656):
+                lca = abs(bfl_486 - bfl_656)
+                if lca < best_lca:
+                    best_lca = lca
+                    best_glass = glass_name
+        except Exception:
+            pass
+    if not best_glass:
+        return {"recommended_glass": "", "estimated_lca_reduction": 0.0}
+    reduction = max(0.0, lca_singlet - best_lca)
+    return {"recommended_glass": best_glass, "estimated_lca_reduction": round(float(reduction), 6)}
 
 
 def parse_import_file_content(content: str) -> list:

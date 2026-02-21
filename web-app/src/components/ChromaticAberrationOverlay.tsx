@@ -69,7 +69,13 @@ export function ChromaticAberrationOverlay({ systemState, onSystemStateChange, p
       },
       { wavelengthMinNm: 400, wavelengthMaxNm: 1100, wavelengthStepNm: 10 }
     )
-      .then((res) => setData(res))
+      .then((res) => {
+        const normalized = (res || []).map((p) => ({
+          wavelength: Number(p.wavelength) || 0,
+          focus_shift: Number(p.focus_shift) ?? NaN,
+        }))
+        setData(normalized)
+      })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to fetch')
         setData([])
@@ -89,7 +95,10 @@ export function ChromaticAberrationOverlay({ systemState, onSystemStateChange, p
   useEffect(() => {
     const surfacesChanged =
       prevSurfacesRef.current.length !== systemState.surfaces.length ||
-      prevSurfacesRef.current.some((s, i) => systemState.surfaces[i]?.material !== s.material)
+      prevSurfacesRef.current.some((s, i) => {
+        const next = systemState.surfaces[i]
+        return next?.material !== s.material || !!next?.sellmeierCoefficients?.B !== !!s.sellmeierCoefficients?.B
+      })
     prevSurfacesRef.current = systemState.surfaces
     if (surfacesChanged) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -104,11 +113,19 @@ export function ChromaticAberrationOverlay({ systemState, onSystemStateChange, p
     }
   }, [fetchData, systemState.surfaces])
 
-  const designWvl = systemState.wavelengths?.[0] ?? 587.6
-  const designPoint = data.find((p) => Math.abs(p.wavelength - designWvl) < 15)
-  const designBFL = designPoint?.focus_shift ?? (data.length ? data[Math.floor(data.length / 2)].focus_shift : 0)
-
-  const validData = data.filter((p) => Number.isFinite(p.focus_shift))
+  const validData = data
+    .filter((p) => Number.isFinite(p.focus_shift) && Number.isFinite(p.wavelength))
+    .sort((a, b) => a.wavelength - b.wavelength)
+  const rawDesignWvl = systemState.wavelengths?.[0] ?? 587.6
+  const designWvl = rawDesignWvl >= 400 && rawDesignWvl <= 1100 ? rawDesignWvl : 587.6
+  const designPoint = validData.reduce<ChromaticShiftPoint | null>(
+    (best, p) =>
+      !best || Math.abs(p.wavelength - designWvl) < Math.abs(best.wavelength - designWvl) ? p : best,
+    null
+  )
+  const designBFL =
+    designPoint?.focus_shift ??
+    (validData.length ? validData[Math.floor(validData.length / 2)].focus_shift : 0)
   const shiftMin = Math.min(...validData.map((p) => p.focus_shift - designBFL), 0)
   const shiftMax = Math.max(...validData.map((p) => p.focus_shift - designBFL), 0)
   const shiftRange = Math.max(shiftMax - shiftMin, 0.5)

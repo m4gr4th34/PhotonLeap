@@ -13,7 +13,7 @@ async function loadTraceScript() {
   // Worker location is the script URL; derive trace.py from same directory.
   const scriptUrl = self.location.href;
   const base = scriptUrl.replace(/[^/]*$/, '');
-  const traceUrl = base + 'trace.py?v=8';
+  const traceUrl = base + 'trace.py?v=17';
   try {
     const res = await fetch(traceUrl, { credentials: 'omit', cache: 'no-store' });
     if (res.ok) return await res.text();
@@ -59,6 +59,24 @@ __result__
       self.postMessage({ type: 'chromatic-shift', id, result: jsResult });
       return;
     }
+    if (type === 'optimize-colors' && traceLoaded && pyodide) {
+      const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      const code = `
+import json
+import base64
+__payload__ = json.loads(base64.b64decode("${b64}").decode())
+__result__ = run_optimize_colors(__payload__)
+__result__
+`;
+      const runOptimize = pyodide.runPythonAsync(code);
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Optimize colors timed out after 60s')), 60000)
+      );
+      const result = await Promise.race([runOptimize, timeout]);
+      const jsResult = result?.toJs ? result.toJs() : (result ?? {});
+      self.postMessage({ type: 'optimize-colors', id, result: jsResult });
+      return;
+    }
     if (type === 'trace' && traceLoaded && pyodide) {
       const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
       const code = `
@@ -99,6 +117,8 @@ __result__
       self.postMessage({ type: 'trace', id, result: null, error: msg });
     } else if (type === 'chromatic-shift') {
       self.postMessage({ type: 'chromatic-shift', id, result: null, error: msg });
+    } else if (type === 'optimize-colors') {
+      self.postMessage({ type: 'optimize-colors', id, result: null, error: msg });
     } else {
       self.postMessage({ type: 'ready', error: msg });
     }
