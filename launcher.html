@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MacOptics — Secure Context Required</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+      color: #e2e8f0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .card {
+      max-width: 520px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(34, 211, 238, 0.2);
+      border-radius: 16px;
+      padding: 2.5rem;
+      box-shadow: 0 0 40px rgba(34, 211, 238, 0.08), 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #22d3ee;
+      margin-bottom: 1rem;
+      letter-spacing: 0.05em;
+    }
+    p {
+      line-height: 1.7;
+      color: #94a3b8;
+      margin-bottom: 1.25rem;
+      font-size: 0.95rem;
+    }
+    .highlight {
+      color: #22d3ee;
+      font-weight: 500;
+    }
+    .steps {
+      margin: 1.5rem 0;
+      padding-left: 1.25rem;
+      border-left: 2px solid rgba(34, 211, 238, 0.3);
+    }
+    .steps li {
+      margin-bottom: 0.75rem;
+      color: #cbd5e1;
+      font-size: 0.9rem;
+    }
+    .steps code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(34, 211, 238, 0.1);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      color: #22d3ee;
+      font-size: 0.85em;
+    }
+    .footer {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>[ SECURE CONTEXT REQUIRED ]</h1>
+    <p>
+      You opened MacOptics from a <span class="highlight">file://</span> location. Modern browsers require a 
+      <strong>Secure Context</strong> (HTTPS or localhost) to run Web Workers—which MacOptics uses for its 
+      in-browser Python physics engine (Pyodide).
+    </p>
+    <p>
+      <strong>One-click fix:</strong> Run the launcher script for your system. It starts a local server and 
+      opens MacOptics in your browser automatically.
+    </p>
+    <ul class="steps">
+      <li><strong>Windows:</strong> Double-click <code>start-windows.bat</code></li>
+      <li><strong>Mac:</strong> Double-click <code>start-mac.command</code> (or right-click → Open)</li>
+    </ul>
+    <p>
+      The script uses Python’s built-in HTTP server—no extra installation needed if Python is already on your system.
+    </p>
+    <div class="footer">
+      MacOptics v2.0 · Photon Leap · Zero-install optical design
+    </div>
+  </div>
+</body>
+</html>
