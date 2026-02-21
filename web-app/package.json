@@ -1,14 +1,14 @@
 {
   "name": "lens-designer",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"tsc -w\" \"vite\"",
     "build": "tsc -b && vite build",
     "build:fresh": "rm -rf dist && tsc -b && vite build",
     "build:standalone": "cp node_modules/coi-serviceworker/coi-serviceworker.min.js public/ && node scripts/patch-coi-sw.cjs && VITE_USE_PYODIDE=true tsc -b && VITE_USE_PYODIDE=true vite build --config vite.standalone.config.ts",
-    "build:zip": "npm run build:standalone && chmod +x dist/start-mac.command 2>/dev/null || true && cd dist && zip -r ../macoptics-standalone.zip . && cd ..",
+    "build:zip": "npm run build:standalone && chmod +x dist/start-mac.command 2>/dev/null || true && cd dist && zip -r ../photonleap-standalone.zip . && cd ..",
     "serve:watch": "browser-sync start --server dist --files 'dist/**/*'",
     "dev:standalone": "npm run build:standalone && npm run serve:watch",
     "lint": "eslint .",
