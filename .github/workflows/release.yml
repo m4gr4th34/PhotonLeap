@@ -1,0 +1,27 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web-app/package-lock.json
+      - run: cd web-app && npm ci
+      - run: cd web-app && npm run build:standalone
+        env:
+          VITE_USE_PYODIDE: "true"
+          VITE_BASE: "/PhotonLeap/"
+      - run: cd web-app/dist && zip -r ../../photonleap-standalone.zip .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: photonleap-standalone.zip
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
