@@ -782,6 +782,7 @@ export function OpticalViewport({
   const viewWidth = config.viewport.width
   const viewHeight = config.viewport.height
   const surfaces = systemState.surfaces
+  const ghostSurfaces = systemState.ghostSurfaces ?? null
   const epd = systemState.entrancePupilDiameter ?? 10
   const semiHeight = epd / 2
 
@@ -879,6 +880,34 @@ export function OpticalViewport({
     }
     return elements
   }, [surfaces, zPositions, epd, scale, xOffset, cy])
+
+  /** Ghost lens elements (agent proposal preview) — same structure as lensElements, rendered with opacity 0.4 */
+  const ghostLensElements = useMemo(() => {
+    if (!ghostSurfaces?.length) return []
+    const ghostZ = computeCumulativeZ(ghostSurfaces)
+    const elements: { type: 'glass' | 'air' | 'surface'; path: string; key: string }[] = []
+    for (let i = 0; i < ghostSurfaces.length; i++) {
+      const s = ghostSurfaces[i]
+      const z = ghostZ[i] ?? 0
+      const n = s.refractiveIndex ?? 1
+      const path = surfaceProfilePath(z, s.radius, s.diameter ?? epd)
+      if (path) elements.push({ type: 'surface', path, key: `ghost-surf-${i}` })
+      if (i < ghostSurfaces.length - 1) {
+        const next = ghostSurfaces[i + 1]
+        const zNext = ghostZ[i + 1] ?? z + s.thickness
+        const pathFront = surfaceProfilePath(z, s.radius, s.diameter ?? epd)
+        const pathBack = surfaceProfilePath(zNext, next.radius, next.diameter ?? epd)
+        if (pathFront && pathBack) {
+          const frontPts = pathFront.split(' L ').map((p) => p.replace('M ', ''))
+          const backPts = pathBack.split(' L ').map((p) => p.replace('M ', '')).reverse()
+          const closed = `M ${frontPts.join(' L ')} L ${backPts.join(' L ')} Z`
+          const gapType = n > 1.01 ? 'glass' : 'air'
+          elements.push({ type: gapType, path: closed, key: `ghost-gap-${i}` })
+        }
+      }
+    }
+    return elements
+  }, [ghostSurfaces, epd, scale, xOffset, cy])
 
   /** Thermal heat map: show when power exceeds threshold and first lens has absorption */
   const thermalHeatMapElement = useMemo(() => {
@@ -1532,6 +1561,21 @@ export function OpticalViewport({
               )
             })}
           </g>
+
+          {ghostLensElements.length > 0 && (
+            <g opacity={0.4} pointerEvents="none">
+              {ghostLensElements.map((el) => (
+                <path
+                  key={el.key}
+                  d={el.path}
+                  fill={el.type === 'glass' ? 'rgba(34, 211, 238, 0.25)' : el.type === 'air' ? 'rgba(255,255,255,0.05)' : 'none'}
+                  stroke="#22D3EE"
+                  strokeWidth={1}
+                  strokeOpacity={0.7}
+                />
+              ))}
+            </g>
+          )}
 
           {thermalHeatMapElement && (
             <path

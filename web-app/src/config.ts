@@ -67,4 +67,14 @@ export const config = {
 
   /** Thermal lensing: power threshold (W) above which heat map overlay is shown */
   thermalPowerThresholdW: 1,
+
+  /** LLM API keys — loaded from localStorage via AgentKeysContext only. No env fallback. */
+  llm: {
+    anthropicApiKey: '',
+    openaiApiKey: '',
+    deepseekApiKey: '',
+  },
+
+  /** Agent self-correction: RMS threshold (μm) above which design is considered failed */
+  agentRmsThresholdUm: 1000,
 } as const

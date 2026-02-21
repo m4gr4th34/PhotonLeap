@@ -101,6 +101,8 @@ export type SystemState = {
   mc_seed?: number
   /** Monte Carlo target yield 0–1 (saved to .lensx) */
   target_yield?: number
+  /** Ghost surfaces from agent proposal — rendered with lower opacity until user confirms */
+  ghostSurfaces?: Surface[] | null
 }
 
 /** Compute performance metrics from system state (prefer trace result when available) */

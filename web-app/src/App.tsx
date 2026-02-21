@@ -8,6 +8,8 @@ import { InfoPanel } from './components/InfoPanel'
 import { ExportDrawing } from './components/ExportDrawing'
 import { CoatingLab } from './components/CoatingLab'
 import { SystemProperties } from './components/SystemProperties'
+import { AgentConsole } from './components/AgentConsole'
+import { AgentKeysProvider } from './contexts/AgentKeysContext'
 import {
   DEFAULT_SYSTEM_STATE,
   computePerformance,
@@ -208,6 +210,7 @@ function App() {
   )
 
   return (
+    <AgentKeysProvider>
     <div className="min-h-screen bg-midnight flex flex-col">
       {showBootOverlay && (
         <NeuralLinkBootSequence onReady={() => setShowBootOverlay(false)} />
@@ -229,6 +232,29 @@ function App() {
             />
           )}
           {activeTab === 'coating' && <CoatingLab />}
+          {activeTab === 'agent' && (
+            <div className="flex flex-1 min-h-0 gap-4">
+              <div className="w-96 shrink-0 overflow-y-auto">
+                <AgentConsole
+                  systemState={systemState}
+                  onSystemStateChange={onSystemStateChange}
+                />
+              </div>
+              <div className="flex-1 min-w-0 min-h-[400px]">
+                <Canvas
+                  systemState={systemState}
+                  onSystemStateChange={onSystemStateChange}
+                  selectedSurfaceId={selectedSurfaceId}
+                  onSelectSurface={setSelectedSurfaceId}
+                  highlightedMetric={null}
+                  showBestFocus={showBestFocus}
+                  snapToFocus={snapToFocus}
+                  snapToSurface={snapToSurface}
+                  onMonteCarloSensitivity={setSensitivityBySurface}
+                />
+              </div>
+            </div>
+          )}
           {activeTab === 'system' && (
             <SystemEditor
               systemState={systemState}
@@ -296,6 +322,7 @@ function App() {
         </aside>
       </div>
     </div>
+    </AgentKeysProvider>
   )
 }
 

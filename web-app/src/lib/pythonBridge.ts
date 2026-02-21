@@ -228,3 +228,31 @@ export function waitForPyodideReady(): Promise<void> {
   if (!isPyodideEnabled()) return Promise.resolve()
   return ensureWorker().then(() => {})
 }
+
+/**
+ * Execute any Python kernel function by name via Pyodide.
+ * Enables agent to invoke run_trace, run_chromatic_shift, run_optimize_colors or future kernels.
+ * @param fn - Python function name (e.g. 'run_trace', 'run_chromatic_shift')
+ * @param payload - Argument passed to the function (e.g. optical_stack for run_trace)
+ */
+export async function executeViaPyodide<T = unknown>(fn: string, payload: unknown): Promise<T> {
+  if (!isPyodideEnabled()) {
+    throw new Error('executeViaPyodide requires VITE_USE_PYODIDE=true')
+  }
+  const w = await ensureWorker()
+  const id = `execute-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve, reject) => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'execute' && e.data.id === id) {
+        w.removeEventListener('message', onMsg)
+        if (e.data.error) {
+          reject(new Error(e.data.error))
+        } else {
+          resolve(e.data.result as T)
+        }
+      }
+    }
+    w.addEventListener('message', onMsg)
+    w.postMessage({ type: 'execute', id, fn, payload })
+  })
+}

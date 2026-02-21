@@ -1,0 +1,296 @@
+/**
+ * LeapOS Agent Console — Command-deck UI for AI-driven optical design.
+ * Natural-language prompts, model selector, context injection.
+ */
+
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound } from 'lucide-react'
+import type { SystemState } from '../types/system'
+import type { AgentModel, AgentModelInfo } from '../types/agent'
+import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
+import { useAgents } from '../contexts/AgentKeysContext'
+import { UplinkModal } from './UplinkModal'
+
+/** Agent Grid — role-based model recommendations for physics tasks */
+const AGENT_MODELS: AgentModelInfo[] = [
+  { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', provider: 'anthropic', role: 'physicist', description: 'Master Consultant — highest reasoning ceiling' },
+  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic', role: 'physicist', description: 'The Physicist — Goldilocks for coding/math' },
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', role: 'visionary', description: 'The Visionary — multimodal, vision-to-physics' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', description: 'Lightweight' },
+  { id: 'o1-2024-12-17', name: 'OpenAI o1', provider: 'openai', role: 'optimizer', description: 'The Optimizer — chain-of-thought reasoning' },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'deepseek', description: 'DeepSeek' },
+  { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', provider: 'deepseek', role: 'optimizer', description: 'Reasoning-heavy for quantum' },
+]
+
+function getApiKeyForModel(model: AgentModel, keys: { openai: string; anthropic: string; deepseek: string }): string | undefined {
+  if (model.startsWith('claude')) return keys.anthropic?.trim() || undefined
+  if (model.startsWith('gpt') || model.startsWith('o1')) return keys.openai?.trim() || undefined
+  if (model.startsWith('deepseek')) return keys.deepseek?.trim() || undefined
+  return undefined
+}
+
+type AgentConsoleProps = {
+  systemState: SystemState
+  onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
+  /** Ghost surfaces for preview (Phase 3.2) — not used yet */
+  ghostSurfaces?: SystemState['surfaces'] | null
+}
+
+export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleProps) {
+  const { keys, setKeys, clearAllKeys } = useAgents()
+  const [uplinkOpen, setUplinkOpen] = useState(false)
+  const [uplinkRequiredMessage, setUplinkRequiredMessage] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState('')
+  const [model, setModel] = useState<AgentModel>('claude-3-5-sonnet-20241022')
+  const [showContext, setShowContext] = useState(false)
+  const [progress, setProgress] = useState<string | null>(null)
+  const [lastResult, setLastResult] = useState<'success' | 'error' | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false)
+      }
+    }
+    if (modelDropdownOpen) document.addEventListener('click', onOutside)
+    return () => document.removeEventListener('click', onOutside)
+  }, [modelDropdownOpen])
+
+  const optical_stack = {
+    surfaces: systemState.surfaces,
+    entrancePupilDiameter: systemState.entrancePupilDiameter,
+    wavelengths: systemState.wavelengths,
+    fieldAngles: systemState.fieldAngles,
+    numRays: systemState.numRays,
+    focusMode: systemState.focusMode,
+    m2Factor: systemState.m2Factor,
+  }
+  const contextJson = buildSystemMessage(optical_stack, systemState.traceResult)
+
+  const apiKey = getApiKeyForModel(model, keys)
+  const hasApiKey = Boolean(apiKey)
+
+  const handleSend = useCallback(async () => {
+    if (!prompt.trim()) return
+    if (!hasApiKey) {
+      const modelName = AGENT_MODELS.find((m) => m.id === model)?.name ?? model
+      setUplinkRequiredMessage(`Neural Link Required: Please provide an API key for ${modelName} to proceed.`)
+      setUplinkOpen(true)
+      return
+    }
+    setProgress('Thinking...')
+    setLastResult(null)
+    setErrorMessage(null)
+
+    const result = await runAgent(systemState, prompt.trim(), {
+      model,
+      maxRetries: 3,
+      onProgress: setProgress,
+      apiKeys: keys.openai || keys.anthropic || keys.deepseek ? keys : undefined,
+      onProposal: (surfaces) => {
+        onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: surfaces }))
+      },
+    })
+
+    setProgress(null)
+
+    if (result.success) {
+      setLastResult('success')
+      const tr = result.traceResult
+      onSystemStateChange((prev) => ({
+        ...prev,
+        surfaces: result.surfaces,
+        ghostSurfaces: null,
+        traceResult: tr
+          ? {
+              rays: tr.rays ?? prev.traceResult?.rays ?? [],
+              surfaces: tr.surfaces ?? prev.traceResult?.surfaces ?? [],
+              focusZ: tr.focusZ ?? prev.traceResult?.focusZ ?? 0,
+              bestFocusZ: tr.bestFocusZ ?? prev.traceResult?.bestFocusZ,
+              zOrigin: tr.zOrigin ?? prev.traceResult?.zOrigin,
+              performance: tr.performance ?? prev.traceResult?.performance,
+              metricsSweep: tr.metricsSweep ?? prev.traceResult?.metricsSweep,
+              gaussianBeam: tr.gaussianBeam ?? prev.traceResult?.gaussianBeam,
+            }
+          : prev.traceResult,
+        hasTraced: true,
+        traceError: null,
+        ...(tr?.performance
+          ? {
+              rmsSpotRadius: tr.performance.rmsSpotRadius,
+              totalLength: tr.performance.totalLength,
+              fNumber: tr.performance.fNumber,
+            }
+          : {}),
+      }))
+    } else {
+      setLastResult('error')
+      setErrorMessage(result.error)
+      onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: null }))
+    }
+  }, [prompt, model, hasApiKey, systemState, onSystemStateChange, keys])
+
+  return (
+    <div className="h-full flex flex-col bg-slate-900/50 rounded-lg border border-white/10 overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/10">
+        <h2 className="text-cyan-electric font-semibold text-lg">LeapOS Command Deck</h2>
+        <p className="text-slate-400 text-sm mt-0.5">
+          Describe your optical design intent. The agent will propose surface changes and validate via ray trace.
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {/* Model selector */}
+        <div>
+          <label className="block text-slate-400 text-xs font-medium mb-1.5">Model</label>
+          <div className="relative" ref={modelDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setModelDropdownOpen((o) => !o)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-200 text-sm hover:border-cyan-electric/30 transition-colors"
+            >
+              <span>{AGENT_MODELS.find((m) => m.id === model)?.name ?? model}</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {modelDropdownOpen && (
+              <div className="absolute top-full left-0 right-0 mt-1 py-1 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-10">
+                {AGENT_MODELS.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      setModel(m.id)
+                      setModelDropdownOpen(false)
+                    }}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-white/5 transition-colors ${
+                      model === m.id ? 'text-cyan-electric bg-white/5' : 'text-slate-300'
+                    }`}
+                  >
+                    <span className="font-medium">{m.name}</span>
+                    {m.role && (
+                      <span className="text-cyan-electric/70 text-xs ml-2">[{m.role}]</span>
+                    )}
+                    <span className="text-slate-500 text-xs ml-2 block mt-0.5">{m.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {!hasApiKey && (
+            <p className="text-amber-500/90 text-xs mt-1.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUplinkRequiredMessage(null)
+                  setUplinkOpen(true)
+                }}
+                className="inline-flex items-center gap-1 text-cyan-electric hover:underline"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Configure Uplink
+              </button>
+              to add an API key
+            </p>
+          )}
+          {hasApiKey && (
+            <button
+              type="button"
+              onClick={() => {
+                setUplinkRequiredMessage(null)
+                setUplinkOpen(true)
+              }}
+              className="text-slate-500 hover:text-cyan-electric text-xs mt-1 flex items-center gap-1"
+            >
+              <KeyRound className="w-3 h-3" />
+              Manage keys
+            </button>
+          )}
+        </div>
+
+        <UplinkModal
+          open={uplinkOpen}
+          onClose={() => {
+            setUplinkOpen(false)
+            setUplinkRequiredMessage(null)
+          }}
+          initialKeys={keys}
+          onSyncKeys={(k) => setKeys(k)}
+          onClearAllKeys={clearAllKeys}
+          requiredMessage={uplinkRequiredMessage ?? undefined}
+        />
+
+        {/* Command input */}
+        <div>
+          <label className="block text-slate-400 text-xs font-medium mb-1.5">Command</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="e.g. Design a beam expander for 532nm laser, 50mm tube length"
+            rows={4}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 focus:shadow-[0_0_8px_rgba(34,211,238,0.25)] resize-none"
+          />
+        </div>
+
+        {/* Context injection (collapsible) */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowContext((c) => !c)}
+            className="flex items-center gap-2 text-slate-400 text-xs font-medium hover:text-cyan-electric/80 transition-colors"
+          >
+            {showContext ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            System context (optical_stack + traceResult)
+          </button>
+          {showContext && (
+            <pre className="mt-2 p-3 bg-black/30 border border-white/10 rounded-lg text-xs text-slate-400 font-mono overflow-auto max-h-48">
+              {contextJson}
+            </pre>
+          )}
+        </div>
+
+        {/* Send button */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!prompt.trim() || !!progress}
+            className="flex items-center gap-2 px-4 py-2 bg-cyan-electric/20 text-cyan-electric rounded-lg font-medium text-sm hover:bg-cyan-electric/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {progress ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {progress}
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                Send
+              </>
+            )}
+          </button>
+          {lastResult === 'success' && (
+            <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
+              <CheckCircle className="w-4 h-4" />
+              Design applied
+            </span>
+          )}
+          {lastResult === 'error' && (
+            <span className="flex items-center gap-1.5 text-amber-500 text-sm">
+              <XCircle className="w-4 h-4" />
+              Failed
+            </span>
+          )}
+        </div>
+
+        {errorMessage && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            <p className="text-amber-500/90 text-sm font-mono">{errorMessage}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

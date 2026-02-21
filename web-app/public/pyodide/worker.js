@@ -107,6 +107,26 @@ __result__
       self.postMessage({ type: 'trace', id, result: jsResult });
       return;
     }
+    if (type === 'execute' && traceLoaded && pyodide) {
+      const { fn, payload } = e.data;
+      const fnName = typeof fn === 'string' ? fn : 'run_trace';
+      const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload || {}))));
+      const code = `
+import json
+import base64
+__payload__ = json.loads(base64.b64decode("${b64}").decode())
+__result__ = ${fnName}(__payload__)
+__result__
+`;
+      const runFn = pyodide.runPythonAsync(code);
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Execute ${fnName} timed out after 30s`)), 30000)
+      );
+      const result = await Promise.race([runFn, timeout]);
+      const jsResult = result?.toJs ? result.toJs() : (result ?? {});
+      self.postMessage({ type: 'execute', id, result: jsResult });
+      return;
+    }
     if (type === 'ping') {
       self.postMessage({ type: 'ping', ok: true });
       return;
@@ -119,6 +139,8 @@ __result__
       self.postMessage({ type: 'chromatic-shift', id, result: null, error: msg });
     } else if (type === 'optimize-colors') {
       self.postMessage({ type: 'optimize-colors', id, result: null, error: msg });
+    } else if (type === 'execute') {
+      self.postMessage({ type: 'execute', id, result: null, error: msg });
     } else {
       self.postMessage({ type: 'ready', error: msg });
     }
