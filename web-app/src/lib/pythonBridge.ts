@@ -4,6 +4,7 @@
  */
 
 import type { TraceResponse } from '../api/trace'
+import type { ChromaticShiftPoint } from '../api/chromatic'
 import type { Surface } from '../types/system'
 import { config } from '../config'
 
@@ -116,6 +117,58 @@ export async function traceViaPyodide(optical_stack: {
     }
     w.addEventListener('message', onMsg)
     w.postMessage({ type: 'trace', id, payload })
+  })
+}
+
+export async function chromaticShiftViaPyodide(optical_stack: {
+  surfaces: Surface[]
+  entrancePupilDiameter: number
+  wavelengths: number[]
+  fieldAngles: number[]
+  numRays: number
+  focusMode?: string
+  m2Factor?: number
+  wavelength_min_nm?: number
+  wavelength_max_nm?: number
+  wavelength_step_nm?: number
+}): Promise<ChromaticShiftPoint[]> {
+  const w = await ensureWorker()
+  const payload = {
+    surfaces: optical_stack.surfaces.map((s) => ({
+      id: s.id,
+      type: s.type,
+      radius: s.radius,
+      thickness: s.thickness,
+      refractiveIndex: s.refractiveIndex,
+      diameter: s.diameter,
+      material: s.material,
+      description: s.description,
+      sellmeierCoefficients: s.sellmeierCoefficients,
+    })),
+    entrancePupilDiameter: optical_stack.entrancePupilDiameter,
+    wavelengths: optical_stack.wavelengths,
+    fieldAngles: (optical_stack.fieldAngles ?? [0]).slice(0, config.maxFieldAngles),
+    numRays: optical_stack.numRays,
+    focusMode: optical_stack.focusMode ?? 'On-Axis',
+    m2Factor: optical_stack.m2Factor ?? 1.0,
+    wavelength_min_nm: optical_stack.wavelength_min_nm ?? 400,
+    wavelength_max_nm: optical_stack.wavelength_max_nm ?? 1100,
+    wavelength_step_nm: optical_stack.wavelength_step_nm ?? 10,
+  }
+  const id = `chromatic-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve, reject) => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'chromatic-shift' && e.data.id === id) {
+        w.removeEventListener('message', onMsg)
+        if (e.data.error) {
+          reject(new Error(e.data.error))
+        } else {
+          resolve((e.data.result ?? []) as ChromaticShiftPoint[])
+        }
+      }
+    }
+    w.addEventListener('message', onMsg)
+    w.postMessage({ type: 'chromatic-shift', id, payload })
   })
 }
 

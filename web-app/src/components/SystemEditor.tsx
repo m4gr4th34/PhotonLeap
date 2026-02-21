@@ -11,7 +11,7 @@ import { ReflectivityCurveGraph } from './ReflectivityCurveGraph'
 import { importLensSystem } from '../api/importLens'
 import { toLensX, parseLensXFile, type CustomCoatingData } from '../lib/lensX'
 
-/** Fallback when API is unavailable */
+/** Initial state before fetchMaterials resolves; fetchMaterials loads full list from API or glass_library.json */
 const GLASS_LIBRARY_FALLBACK: MaterialOption[] = [
   { name: 'Air', n: 1 },
   { name: 'N-BK7', n: 1.5168 },

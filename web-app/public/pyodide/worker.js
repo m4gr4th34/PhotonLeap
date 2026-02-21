@@ -13,7 +13,7 @@ async function loadTraceScript() {
   // Worker location is the script URL; derive trace.py from same directory.
   const scriptUrl = self.location.href;
   const base = scriptUrl.replace(/[^/]*$/, '');
-  const traceUrl = base + 'trace.py?v=6';
+  const traceUrl = base + 'trace.py?v=8';
   try {
     const res = await fetch(traceUrl, { credentials: 'omit', cache: 'no-store' });
     if (res.ok) return await res.text();
@@ -36,6 +36,27 @@ self.onmessage = async (e) => {
       await pyodide.runPythonAsync(traceScript);
       traceLoaded = true;
       self.postMessage({ type: 'ready' });
+      return;
+    }
+    if (type === 'chromatic-shift' && traceLoaded && pyodide) {
+      const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      const wmin = payload.wavelength_min_nm ?? 400;
+      const wmax = payload.wavelength_max_nm ?? 1100;
+      const wstep = payload.wavelength_step_nm ?? 10;
+      const code = `
+import json
+import base64
+__payload__ = json.loads(base64.b64decode("${b64}").decode())
+__result__ = run_chromatic_shift(__payload__, wavelength_min_nm=${wmin}, wavelength_max_nm=${wmax}, wavelength_step_nm=${wstep})
+__result__
+`;
+      const runChromatic = pyodide.runPythonAsync(code);
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Chromatic shift timed out after 30s')), 30000)
+      );
+      const result = await Promise.race([runChromatic, timeout]);
+      const jsResult = result?.toJs ? result.toJs() : (result ?? []);
+      self.postMessage({ type: 'chromatic-shift', id, result: jsResult });
       return;
     }
     if (type === 'trace' && traceLoaded && pyodide) {
@@ -76,6 +97,8 @@ __result__
     const msg = err?.message || String(err);
     if (type === 'trace') {
       self.postMessage({ type: 'trace', id, result: null, error: msg });
+    } else if (type === 'chromatic-shift') {
+      self.postMessage({ type: 'chromatic-shift', id, result: null, error: msg });
     } else {
       self.postMessage({ type: 'ready', error: msg });
     }

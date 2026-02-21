@@ -1,10 +1,12 @@
 /**
  * API client for chromatic focus shift analysis.
  * Returns focus_shift (BFL in mm) vs wavelength for dispersion visualization.
+ * When VITE_USE_PYODIDE=true, uses in-browser Pyodide worker (zero-install).
  */
 
 import type { Surface } from '../types/system'
 import { config } from '../config'
+import { chromaticShiftViaPyodide, isPyodideEnabled } from '../lib/pythonBridge'
 
 export type ChromaticShiftPoint = {
   wavelength: number
@@ -42,6 +44,14 @@ export async function fetchChromaticShift(
     wavelengthStepNm?: number
   }
 ): Promise<ChromaticShiftPoint[]> {
+  if (isPyodideEnabled()) {
+    return chromaticShiftViaPyodide({
+      ...opticalStack,
+      wavelength_min_nm: options?.wavelengthMinNm ?? 400,
+      wavelength_max_nm: options?.wavelengthMaxNm ?? 1100,
+      wavelength_step_nm: options?.wavelengthStepNm ?? 10,
+    })
+  }
   const payload = {
     surfaces: opticalStack.surfaces.map(surfaceToPayload),
     entrancePupilDiameter: opticalStack.entrancePupilDiameter,

@@ -35,26 +35,43 @@ export function nFromCoeffs(lambdaNm: number, coeffs: Record<string, unknown>): 
 
 export type MaterialOption = { name: string; n: number; coefficients?: Record<string, unknown> }
 
-/** Fetch materials from backend; returns { name, n } for dropdown. Falls back to default list on error. */
+/** Fetch materials from backend; returns { name, n } for dropdown. Falls back to local glass_library.json when API unavailable (e.g. Pyodide mode). */
 export async function fetchMaterials(): Promise<MaterialOption[]> {
-  const DEFAULT: MaterialOption[] = [
-    { name: 'Air', n: 1 },
-    { name: 'N-BK7', n: 1.5168 },
-    { name: 'Fused Silica', n: 1.458 },
-    { name: 'N-SF11', n: 1.78472 },
-    { name: 'N-SF5', n: 1.6727 },
-  ]
-  try {
-    const res = await fetch(`${API_BASE}/api/materials`)
-    if (!res.ok) return DEFAULT
-    const data = (await res.json()) as GlassMaterial[]
+  const toOptions = (data: GlassMaterial[]): MaterialOption[] => {
     const wvl = 587.6
     return data.map((m) => ({
       name: m.name,
       n: nFromCoeffs(wvl, m.coefficients || {}),
       coefficients: m.coefficients,
     }))
-  } catch {
-    return DEFAULT
   }
+  try {
+    const res = await fetch(`${API_BASE}/api/materials`)
+    if (res.ok) {
+      const data = (await res.json()) as GlassMaterial[]
+      return toOptions(data)
+    }
+  } catch {
+    /* API unavailable, try local fallback */
+  }
+  try {
+    const base = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || '/'
+    const path = base.endsWith('/') ? `${base}glass_library.json` : `${base}/glass_library.json`
+    const url = typeof location !== 'undefined' ? new URL(path, location.href).href : path
+    const res = await fetch(url)
+    if (res.ok) {
+      const json = (await res.json()) as { materials?: GlassMaterial[] }
+      const data = json.materials || []
+      return toOptions(data)
+    }
+  } catch {
+    /* fallback to minimal list */
+  }
+  return [
+    { name: 'Air', n: 1 },
+    { name: 'N-BK7', n: 1.5168 },
+    { name: 'Fused Silica', n: 1.458 },
+    { name: 'N-SF11', n: 1.78472 },
+    { name: 'N-SF5', n: 1.6727 },
+  ]
 }

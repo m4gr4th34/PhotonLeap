@@ -59,19 +59,33 @@ export type CustomCoatingCreate = {
 }
 
 export async function fetchCoatings(): Promise<CoatingOption[]> {
+  const toOptions = (data: unknown[]): CoatingOption[] =>
+    data.map((c) => {
+      const x = c as { name?: string; description?: string; is_hr?: boolean }
+      return { name: x.name ?? '', description: x.description ?? '', is_hr: x.is_hr ?? false }
+    })
   try {
     const res = await fetch(`${API_BASE}/api/coatings`)
-    if (!res.ok) return COATINGS_FALLBACK
-    const data = await res.json()
-    if (!Array.isArray(data)) return COATINGS_FALLBACK
-    return data.map((c: { name?: string; description?: string; is_hr?: boolean }) => ({
-      name: c.name ?? '',
-      description: c.description ?? '',
-      is_hr: c.is_hr ?? false,
-    }))
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data)) return toOptions(data)
+    }
   } catch {
-    return COATINGS_FALLBACK
+    /* API unavailable, try local fallback */
   }
+  try {
+    const base = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || '/'
+    const path = base.endsWith('/') ? `${base}coatings_library.json` : `${base}/coatings_library.json`
+    const url = typeof location !== 'undefined' ? new URL(path, location.href).href : path
+    const res = await fetch(url)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data)) return toOptions(data)
+    }
+  } catch {
+    /* fallback to minimal list */
+  }
+  return COATINGS_FALLBACK
 }
 
 /** Fallback library when API unavailable (e.g. CI, offline) — ensures catalog has BBAR and common coatings */
@@ -83,22 +97,42 @@ const LIBRARY_FALLBACK: CoatingLibraryItem[] = COATINGS_FALLBACK.map((c) => ({
 
 /** Fetch full library with category and source (built-in vs custom) */
 export async function fetchCoatingsLibrary(): Promise<CoatingLibraryItem[]> {
+  const toLibrary = (data: unknown[]): CoatingLibraryItem[] =>
+    data.map((c) => {
+      const x = c as { name?: string; description?: string; is_hr?: boolean; category?: string; source?: string }
+      return {
+        name: x.name ?? '',
+        description: x.description ?? '',
+        is_hr: x.is_hr ?? false,
+        category: x.category ?? (x.is_hr ? 'HR' : 'AR'),
+        source: x.source === 'custom' ? 'custom' : 'builtin',
+      }
+    })
   try {
     const res = await fetch(`${API_BASE}/api/coatings/library`)
-    if (!res.ok) return LIBRARY_FALLBACK
-    const data = await res.json()
-    if (!Array.isArray(data)) return LIBRARY_FALLBACK
-    const mapped = data.map((c: { name?: string; description?: string; is_hr?: boolean; category?: string; source?: string }) => ({
-      name: c.name ?? '',
-      description: c.description ?? '',
-      is_hr: c.is_hr ?? false,
-      category: c.category ?? 'Custom',
-      source: (c.source === 'custom' ? 'custom' : 'builtin') as 'builtin' | 'custom',
-    }))
-    return mapped.length > 0 ? mapped : LIBRARY_FALLBACK
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        const mapped = toLibrary(data)
+        if (mapped.length > 0) return mapped
+      }
+    }
   } catch {
-    return LIBRARY_FALLBACK
+    /* API unavailable, try local fallback */
   }
+  try {
+    const base = (typeof import.meta !== 'undefined' && (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) || '/'
+    const path = base.endsWith('/') ? `${base}coatings_library.json` : `${base}/coatings_library.json`
+    const url = typeof location !== 'undefined' ? new URL(path, location.href).href : path
+    const res = await fetch(url)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data)) return toLibrary(data)
+    }
+  } catch {
+    /* fallback */
+  }
+  return LIBRARY_FALLBACK
 }
 
 export type CoatingDefinition = {
@@ -193,18 +227,61 @@ function reflectivityCurveFallback(
         return 0.013 * (1 + 0.1 * (t - 1) ** 2)
       case 'BBAR':
         return lam >= 400 && lam <= 700 ? 0.004 + 0.001 * Math.abs(lam - 550) / 150 : 0.01
+      case 'V-Coat 355':
+        return 0.0025 + 0.01 * Math.min(Math.abs(lam - 355) / 30, 1)
       case 'V-Coat 532':
         return 0.0025 + 0.01 * Math.min(Math.abs(lam - 532) / 50, 1)
+      case 'V-Coat 633':
+        return 0.0025 + 0.01 * Math.min(Math.abs(lam - 633) / 50, 1)
       case 'V-Coat 1064':
         return 0.0025 + 0.01 * Math.min(Math.abs(lam - 1064) / 100, 1)
+      case 'V-Coat 1550':
+        return 0.0025 + 0.01 * Math.min(Math.abs(lam - 1550) / 100, 1)
       case 'Protected Silver':
         return 0.975
       case 'Protected Gold':
         return 0.98
       case 'Protected Aluminum':
         return 0.92
+      case 'Enhanced Silver':
+        return 0.985
       case 'HR':
+      case 'HR 355':
+      case 'HR 532':
+      case 'HR 633':
+      case 'HR 1064':
+      case 'HR 355nm':
+      case 'HR 1064nm':
+      case 'HR Broadband':
         return 0.995
+      case 'Dielectric MaxReflect':
+        return 0.999
+      case 'Beamsplitter 50/50':
+      case 'Cube 50/50':
+        return 0.5
+      case 'Beamsplitter 70/30':
+      case 'Cube 70/30':
+        return 0.7
+      case 'Beamsplitter 90/10':
+        return 0.9
+      case 'Beamsplitter 60/40':
+        return 0.6
+      case 'Beamsplitter 80/20':
+        return 0.8
+      case 'Beamsplitter 30/70':
+        return 0.3
+      case 'Beamsplitter 10/90':
+        return 0.1
+      case 'Pellicle 8%':
+        return 0.08
+      case 'Pellicle 45%':
+        return 0.45
+      case 'Neutral Density 50%':
+        return 0.25
+      case 'Neutral Density 10%':
+        return 0.45
+      case 'Neutral Density 1%':
+        return 0.495
       default:
         return 0.04
     }

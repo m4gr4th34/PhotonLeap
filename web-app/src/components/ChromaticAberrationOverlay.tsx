@@ -69,9 +69,7 @@ export function ChromaticAberrationOverlay({ systemState, onSystemStateChange, p
       },
       { wavelengthMinNm: 400, wavelengthMaxNm: 1100, wavelengthStepNm: 10 }
     )
-      .then((res) => {
-        setData(res)
-      })
+      .then((res) => setData(res))
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to fetch')
         setData([])

@@ -59,6 +59,67 @@ def n_from_sellmeier(wvl_nm, sellmeier):
     return float(np.sqrt(max(1.0, n2)))
 
 
+# Embedded glass library for wavelength-dependent n(λ) when sellmeierCoefficients missing.
+# Matches backend glass_materials; enables chromatic dispersion in Pyodide mode.
+_GLASS_LIBRARY = {
+    "air": {"formula": "constant", "coeffs": {"n": 1.0}},
+    "n-bk7": {"formula": "sellmeier", "coeffs": {"B": [1.03961212, 0.231792344, 1.01046945], "C": [0.00600069867, 0.0200179144, 103.560653]}},
+    "bk7": "n-bk7", "nbk7": "n-bk7",
+    "n-sf11": {"formula": "sellmeier", "coeffs": {"B": [1.73848403, 0.31116824, 1.17490871], "C": [0.0133711172, 0.0619001176, 121.419942]}},
+    "n-sf5": {"formula": "sellmeier", "coeffs": {"B": [1.31038764, 0.196681836, 0.966129764], "C": [0.00958633072, 0.0457627625, 99.2753302]}},
+    "n-sf6": {"formula": "sellmeier", "coeffs": {"B": [1.77931763, 0.33814987, 1.64430452], "C": [0.0133711172, 0.0619001176, 166.886499]}},
+    "n-sf10": {"formula": "sellmeier", "coeffs": {"B": [1.61625974, 0.259229334, 0.96887106], "C": [0.0106200162, 0.0473625942, 119.248795]}},
+    "n-sf14": {"formula": "sellmeier", "coeffs": {"B": [1.69022361, 0.288683042, 1.7045187], "C": [0.01306176267, 0.0619001176, 147.468793]}},
+    "n-f2": {"formula": "sellmeier", "coeffs": {"B": [1.31038764, 0.196681836, 0.966129764], "C": [0.00958633072, 0.0457627625, 99.2753302]}},
+    "f2": "n-f2",
+    "n-sk2": {"formula": "sellmeier", "coeffs": {"B": [1.34317774, 0.241144399, 0.994317969], "C": [0.00704687339, 0.0229005, 92.7508526]}},
+    "fused silica": {"formula": "sellmeier", "coeffs": {"B": [0.6961663, 0.4079426, 0.8974794], "C": [0.004679148, 0.01351206, 97.93432]}},
+    "silica": "fused silica", "fused-silica": "fused silica",
+    "n-baf10": {"formula": "sellmeier", "coeffs": {"B": [1.5851495, 0.143571385, 1.08521269], "C": [0.00909730952, 0.0424520636, 105.613573]}},
+    "n-lak9": {"formula": "sellmeier", "coeffs": {"B": [1.41673927, 0.126605356, 1.28217827], "C": [0.00906333117, 0.0493226978, 95.6403971]}},
+    "h-laf7": {"formula": "sellmeier", "coeffs": {"B": [1.66842615, 0.298521883, 1.07794363], "C": [0.00704687339, 0.0315631177, 95.2779353]}},
+    "calcium fluoride": {"formula": "sellmeier", "coeffs": {"B": [0.5675888, 0.4710914, 3.8484723], "C": [0.00252643, 0.01007833, 1200.556]}},
+    "caf2": "calcium fluoride",
+    "magnesium fluoride": {"formula": "sellmeier", "coeffs": {"B": [0.48755108, 0.39875031, 2.3120353], "C": [0.001882178, 0.008951888, 566.13559]}},
+    "mgf2": "magnesium fluoride",
+    "sapphire": {"formula": "sellmeier", "coeffs": {"B": [1.4313493, 0.65054713, 5.3414021], "C": [0.0052799261, 0.0142382647, 325.017834]}},
+    "n-k5": {"formula": "sellmeier", "coeffs": {"B": [1.15131343, 0.218304662, 0.839477603], "C": [0.00704687339, 0.0229005, 95.2593215]}},
+    "n-sk16": {"formula": "sellmeier", "coeffs": {"B": [1.34317774, 0.241144399, 0.994317969], "C": [0.00704687339, 0.0229005, 92.7508526]}},
+    "n-baf4": {"formula": "sellmeier", "coeffs": {"B": [1.31038764, 0.196681836, 0.966129764], "C": [0.00958633072, 0.0457627625, 99.2753302]}},
+    "n-sf6ht": {"formula": "sellmeier", "coeffs": {"B": [1.77931763, 0.33814987, 1.64430452], "C": [0.0133711172, 0.0619001176, 166.886499]}},
+    "n-lak14": {"formula": "sellmeier", "coeffs": {"B": [1.49172984, 0.127950879, 1.14545231], "C": [0.00779980626, 0.0315631177, 95.2779353]}},
+    "n-bk10": {"formula": "sellmeier", "coeffs": {"B": [1.04502733, 0.231755984, 0.96817704], "C": [0.00600069867, 0.0200179144, 103.560653]}},
+    "n-sf57": {"formula": "sellmeier", "coeffs": {"B": [1.81651371, 0.428893641, 1.07186278], "C": [0.0143704198, 0.0592801172, 121.419942]}},
+    "n-sf66": {"formula": "sellmeier", "coeffs": {"B": [1.85504134, 0.420402765, 1.31047689], "C": [0.0162382647, 0.0619001176, 121.419942]}},
+    "n-sf15": {"formula": "sellmeier", "coeffs": {"B": [1.56032691, 0.276257333, 0.947719839], "C": [0.00958633072, 0.0457627625, 99.2753302]}},
+}
+
+
+def _refractive_index_at_wavelength(wvl_nm, material_name, n_fallback):
+    """n(λ) from material name (glass library) or fallback. Matches backend glass_materials."""
+    if not material_name or not str(material_name).strip():
+        return n_fallback
+    if n_fallback <= 1.001:
+        return 1.0
+    key = str(material_name).lower().strip()
+    entry = _GLASS_LIBRARY.get(key)
+    if entry is None:
+        if key.startswith("n-"):
+            entry = _GLASS_LIBRARY.get(key[2:])
+        if entry is None:
+            return n_fallback
+    if isinstance(entry, str):
+        entry = _GLASS_LIBRARY.get(entry, {})
+    if not isinstance(entry, dict):
+        return n_fallback
+    if entry.get("formula") == "sellmeier":
+        coeffs = entry.get("coeffs", {})
+        return n_from_sellmeier(wvl_nm, coeffs)
+    if entry.get("formula") == "constant":
+        return float(entry.get("coeffs", {}).get("n", n_fallback))
+    return n_fallback
+
+
 def get_n_after(surfaces, i, s, wvl_nm):
     """n2 = material of the space between surface i and i+1 (surface i's thickness).
     CRITICAL: optical_stack[i].n applies ONLY to propagation over thickness[i].
@@ -75,13 +136,15 @@ def get_n_after(surfaces, i, s, wvl_nm):
 
 def get_n(surface, wvl_nm):
     """Refractive index for surface at wavelength. Never return 0 or null.
-    Uses Sellmeier if available, else refractiveIndex. Validates for the specific wvl_nm being traced."""
+    Uses Sellmeier if available, else material lookup from glass library, else refractiveIndex."""
     wvl_nm = float(wvl_nm)
     sellmeier = surface.get("sellmeierCoefficients")
     if sellmeier and isinstance(sellmeier, dict):
         n = n_from_sellmeier(wvl_nm, sellmeier)
     else:
-        n = float(surface.get("refractiveIndex", 1.52) or 1.52)
+        n_fallback = float(surface.get("refractiveIndex", 1.52) or 1.52)
+        material = surface.get("material") or ""
+        n = _refractive_index_at_wavelength(wvl_nm, material, n_fallback)
     if np.isnan(n) or n <= 0 or not np.isfinite(n):
         n = float(surface.get("refractiveIndex", 1.52) or 1.52)
     return max(0.1, min(10.0, float(n)))  # Clamp to avoid TIR/division issues
@@ -533,6 +596,71 @@ def run_trace(optical_stack):
             "focusZ": focus_z,
         },
     }
+
+
+def run_chromatic_shift(optical_stack, wavelength_min_nm=400.0, wavelength_max_nm=1100.0, wavelength_step_nm=10.0):
+    """
+    Chromatic focus shift: for each wavelength, trace on-axis rays and return BFL (mm).
+    Returns [{wavelength, focus_shift}, ...] for LCA overlay when backend is unavailable.
+    """
+    surfaces = optical_stack.get("surfaces", [])
+    if not surfaces:
+        return []
+    epd = float(optical_stack.get("entrancePupilDiameter", 10) or 10)
+    num_rays = max(2, int(optical_stack.get("numRays", 9) or 9))
+
+    cumulative_z = [0.0]
+    for s in surfaces[:-1]:
+        t = float(s.get("thickness", 0) or 0)
+        cumulative_z.append(cumulative_z[-1] + t)
+    last_vertex_z = cumulative_z[-1]
+    z_cur = last_vertex_z + float(surfaces[-1].get("thickness", 0) or 0)
+    z_target = max(z_cur + 100.0, Z_TARGET)
+    z_sweep_min = RAY_START_Z
+    z_sweep_max = z_cur * 1.5
+
+    wavelengths = []
+    w = wavelength_min_nm
+    while w <= wavelength_max_nm:
+        wavelengths.append(w)
+        w += wavelength_step_nm
+
+    def _rms_at_z(rays, z):
+        y_vals = []
+        for ray in rays:
+            for k in range(len(ray) - 1):
+                if ray[k][0] <= z <= ray[k + 1][0] or ray[k + 1][0] <= z <= ray[k][0]:
+                    t = (z - ray[k][0]) / (ray[k + 1][0] - ray[k][0]) if ray[k + 1][0] != ray[k][0] else 0
+                    y_vals.append(ray[k][1] + t * (ray[k + 1][1] - ray[k][1]))
+                    break
+        if not y_vals:
+            return None
+        y_arr = np.array(y_vals)
+        return float(np.sqrt(np.mean(y_arr**2) - np.mean(y_arr) ** 2))
+
+    result = []
+    for wvl_nm in wavelengths:
+        rays = []
+        dz0, dy0 = 1.0, 0.0
+        for k in range(num_rays):
+            v = (k / max(1, num_rays - 1) - 0.5) * 2 if num_rays > 1 else 0
+            y0 = (epd / 2) * v
+            path = trace_ray(RAY_START_Z, y0, dz0, dy0, surfaces, wvl_nm, cumulative_z, z_target, log_refraction=False)
+            if path and len(path) >= 2:
+                rays.append(path)
+        if not rays:
+            result.append({"wavelength": float(wvl_nm), "focus_shift": float("nan")})
+            continue
+        best_z = last_vertex_z
+        best_rms = float("inf")
+        for z in np.linspace(z_sweep_min, min(z_sweep_max, z_cur + 100.0), 80):
+            rms = _rms_at_z(rays, z)
+            if rms is not None and rms < best_rms:
+                best_rms = rms
+                best_z = z
+        bfl = best_z - last_vertex_z if np.isfinite(best_rms) else float("nan")
+        result.append({"wavelength": float(wvl_nm), "focus_shift": float(bfl)})
+    return result
 
 
 def parse_import_file_content(content: str) -> list:
