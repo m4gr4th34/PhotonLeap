@@ -364,18 +364,18 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
           </div>
         )}
 
-        {/* Recent commands — elegantly shown above input */}
+        {/* Recent commands — subtle, secondary to active input */}
         {commandHistory.length > 0 && (
-          <div className="space-y-1.5">
-            <label className="block text-slate-400 text-xs font-medium">Recent commands</label>
-            <div className="space-y-1 max-h-24 overflow-y-auto">
+          <div className="space-y-1">
+            <label className="block text-slate-500/80 text-[10px] font-medium uppercase tracking-wider">Recent commands</label>
+            <div className="space-y-0.5 max-h-20 overflow-y-auto">
               {commandHistory.slice(0, 5).map((cmd, i) => (
                 <div
                   key={`${i}-${cmd.slice(0, 20)}`}
-                  className="px-3 py-2 rounded-lg bg-slate-800/60 border border-white/5 text-slate-300 text-sm font-mono leading-relaxed truncate"
+                  className="px-2.5 py-1.5 rounded-md bg-slate-800/40 border border-white/[0.04] text-slate-500 text-[11px] font-mono leading-relaxed truncate"
                   title={cmd}
                 >
-                  <span className="text-cyan-electric/70 text-xs mr-2">›</span>
+                  <span className="text-slate-600 mr-1.5">›</span>
                   {cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd}
                 </div>
               ))}
@@ -420,7 +420,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 focus:shadow-[0_0_8px_rgba(34,211,238,0.25)] resize-none"
           />
           {commandHistory.length > 0 && (
-            <p className="text-slate-500 text-[10px] mt-1">↑↓ to browse previous commands</p>
+            <p className="text-slate-600/80 text-[10px] mt-1">↑↓ browse history</p>
           )}
         </div>
 
@@ -441,13 +441,13 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
           )}
         </div>
 
-        {/* Real-time thinking stream (LM Studio local mode) */}
+        {/* Real-time thinking stream (LM Studio local mode) — subtle, secondary */}
         {thinkingStream && (
-          <div className="p-3 rounded-lg bg-slate-800/80 border border-cyan-electric/20">
-            <p className="text-cyan-electric/90 text-xs font-medium mb-1.5">Thinking…</p>
+          <div className="p-2.5 rounded-lg bg-slate-800/50 border border-white/[0.06]">
+            <p className="text-slate-500/90 text-[10px] font-medium uppercase tracking-wider mb-1">Thinking…</p>
             <div
               ref={thinkingContainerRef}
-              className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-40 overflow-y-auto"
+              className="text-slate-500/90 text-[11px] leading-relaxed whitespace-pre-wrap font-mono max-h-36 overflow-y-auto"
             >
               {thinkingStream}
             </div>
