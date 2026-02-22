@@ -1037,7 +1037,10 @@ export function SystemEditor({
                     type="text"
                     value={s.semanticName ?? ''}
                     placeholder={`S${i + 1}`}
-                    onChange={(e) => updateSurface(s.id, { semanticName: e.target.value.trim() || undefined })}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      updateSurface(s.id, { semanticName: v.trim() === '' ? undefined : v })
+                    }}
                     onClick={(e) => e.stopPropagation()}
                     className={`${inputClass} min-w-[7rem]`}
                     title="Semantic name for AI context"
@@ -1047,7 +1050,10 @@ export function SystemEditor({
                   <input
                     type="text"
                     value={s.aiContext ?? ''}
-                    onChange={(e) => updateSurface(s.id, { aiContext: e.target.value.trim() || undefined })}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      updateSurface(s.id, { aiContext: v.trim() === '' ? undefined : v })
+                    }}
                     onClick={(e) => e.stopPropagation()}
                     placeholder="e.g. Corrects coma from S1"
                     className={`${inputClass} min-w-[8rem] text-xs`}
