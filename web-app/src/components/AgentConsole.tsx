@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import ReactDOM from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X, Shield, ShieldAlert, RefreshCw } from 'lucide-react'
 import { config } from '../config'
@@ -421,6 +422,78 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
           localModels={localModels}
           onLocalModelsChange={setLocalModels}
         />
+
+        {/* New Session confirmation modal */}
+        {ReactDOM.createPortal(
+          <AnimatePresence>
+            {newSessionConfirmOpen && (
+              <motion.div
+                key="new-session-confirm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                onClick={(e) => e.target === e.currentTarget && setNewSessionConfirmOpen(false)}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="new-session-confirm-title"
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="w-full max-w-sm rounded-xl border border-slate-600/80 bg-slate-900/95 shadow-2xl backdrop-blur-xl p-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 id="new-session-confirm-title" className="text-lg font-semibold text-cyan-electric mb-2">
+                    New Session
+                  </h3>
+                  <p className="text-slate-300 text-sm mb-4">
+                    Are you sure you want to reset all context? The agent will forget previous goals, constraints, and failed attempts.
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewSessionConfirmOpen(false)}
+                      className="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNewSessionConfirm}
+                      className="px-3 py-1.5 text-sm font-medium bg-cyan-electric/20 text-cyan-electric hover:bg-cyan-electric/30 rounded-lg transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+
+        {/* New Session success toast */}
+        {ReactDOM.createPortal(
+          <AnimatePresence>
+            {newSessionToast && (
+              <motion.div
+                key="new-session-toast"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm shadow-xl backdrop-blur-sm flex items-center gap-2"
+                role="status"
+                aria-live="polite"
+              >
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                Session reset — context cleared
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
 
         {/* Local Node Offline warning — offer to switch back to Cloud */}
         {localOfflineWarning && localMode && (
