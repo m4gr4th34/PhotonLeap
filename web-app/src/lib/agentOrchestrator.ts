@@ -201,10 +201,12 @@ export function parseTransaction(text: string, surfaces: Surface[], options?: Pa
           }
         }
       }
-      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { surfaceDeltas?: unknown }).surfaceDeltas)) {
-        const t = parsed as { surfaceDeltas: unknown[]; reasoning?: string; physicsViolation?: boolean; reason?: string; suggestedAlternative?: string }
+      const surfaceDeltas = (parsed as { surfaceDeltas?: unknown; surface_deltas?: unknown }).surfaceDeltas
+        ?? (parsed as { surface_deltas?: unknown }).surface_deltas
+      if (parsed && typeof parsed === 'object' && Array.isArray(surfaceDeltas)) {
+        const t = parsed as { reasoning?: string; physicsViolation?: boolean; reason?: string; suggestedAlternative?: string }
         return {
-          surfaceDeltas: t.surfaceDeltas.filter((d): d is SurfaceDelta =>
+          surfaceDeltas: surfaceDeltas.filter((d): d is SurfaceDelta =>
             d != null && typeof d === 'object' && typeof (d as Record<string, unknown>).id === 'string'
           ),
           reasoning: t.reasoning,
@@ -349,6 +351,20 @@ async function callAnthropicStreaming(
       }
     }
   }
+  for (const line of buffer.split('\n')) {
+    if (line.startsWith('data: ')) {
+      const raw = line.slice(6).trim()
+      if (!raw || raw === '[DONE]') continue
+      try {
+        const data = JSON.parse(raw) as { type?: string; delta?: { type?: string; thinking?: string; text?: string } }
+        if (data.type === 'content_block_delta' && data.delta?.type === 'text_delta' && typeof data.delta.text === 'string') {
+          fullText += data.delta.text
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
   return fullText
 }
 
@@ -417,18 +433,33 @@ async function callOpenAIStreaming(
       }
     }
   }
+  for (const line of buffer.split('\n')) {
+    if (line.startsWith('data: ')) {
+      const raw = line.slice(6).trim()
+      if (!raw || raw === '[DONE]') continue
+      try {
+        const delta = (JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }> }).choices?.[0]?.delta
+        if (delta?.content) fullContent += delta.content
+      } catch {
+        // skip
+      }
+    }
+  }
   return fullContent
 }
 
-/** Stream DeepSeek Chat Completions — reasoning_content or content to onThinking */
+/** Stream DeepSeek Chat Completions — reasoning_content or content to onThinking.
+ * Progressive max_tokens: 16K → 32K → 64K on retries so complex reasoning can complete. */
 async function callDeepSeekStreaming(
   apiKey: string,
   model: string,
   systemMessage: string,
   userMessage: string,
   onThinking: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  attempt = 0
 ): Promise<string> {
+  const maxTokens = Math.min(16384 * (1 << Math.min(attempt, 2)), 65536)
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
     signal,
@@ -438,7 +469,7 @@ async function callDeepSeekStreaming(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2048,
+      max_tokens: maxTokens,
       stream: true,
       messages: [
         { role: 'system', content: systemMessage },
@@ -480,6 +511,18 @@ async function callDeepSeekStreaming(
         } catch {
           // skip
         }
+      }
+    }
+  }
+  for (const line of buffer.split('\n')) {
+    if (line.startsWith('data: ')) {
+      const raw = line.slice(6).trim()
+      if (!raw || raw === '[DONE]') continue
+      try {
+        const delta = (JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }> }).choices?.[0]?.delta
+        if (delta?.content) fullContent += delta.content
+      } catch {
+        // skip
       }
     }
   }
@@ -580,7 +623,8 @@ async function callLLM(
   apiKeys?: { openai?: string; anthropic?: string; deepseek?: string },
   localMode?: boolean,
   onThinking?: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  attempt?: number
 ): Promise<string> {
   // Local Mode with streaming: LM Studio native API for real-time reasoning
   if (localMode && onThinking) {
@@ -685,8 +729,10 @@ async function callLLM(
   if (model.startsWith('deepseek')) {
     if (!deepseekApiKey) throw new Error('API key required for DeepSeek. Add your key in Agent Uplink.')
     if (onThinking) {
-      return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal)
+      return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal, attempt ?? 0)
     }
+    const attemptNum = attempt ?? 0
+    const maxTokens = Math.min(16384 * (1 << Math.min(attemptNum, 2)), 65536)
     const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       signal,
@@ -696,7 +742,7 @@ async function callLLM(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 2048,
+        max_tokens: maxTokens,
         messages: [
           { role: 'system', content: systemMessage },
           { role: 'user', content: userMessage },
@@ -824,15 +870,17 @@ export async function runAgent(
       systemMessage = buildSystemMessage({ ...optical_stack, surfaces }, currentTrace)
     }
 
-    const errorContext =
-      attempt > 0 && lastError
-        ? `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
-        : ''
-    if (session && attempt > 0) updateEpisodic(session, { failedIterations: [lastError] })
+    const isParseError = lastError === 'Could not parse valid transaction from LLM response'
+    const errorContext = attempt > 0 && lastError
+      ? isParseError
+        ? `\n\nYour previous response was not valid JSON. Return ONLY a raw JSON object with "surfaceDeltas" (array) and optional "reasoning". No markdown, no \`\`\`json\`\`\` blocks, no text before or after. Example: {"surfaceDeltas":[{"id":"...","radius":50}],"reasoning":"..."}`
+        : `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
+      : ''
+    if (session && attempt > 0) updateEpisodic(session, { failedIterations: [isParseError ? 'Parse error (invalid JSON)' : lastError] })
 
     let text: string
     try {
-      text = await callLLM(routedModel, systemMessage, effectivePrompt + errorContext, apiKeys, localMode, onThinking, signal)
+      text = await callLLM(routedModel, systemMessage, effectivePrompt + errorContext, apiKeys, localMode, onThinking, signal, attempt)
     } catch (err) {
       const aborted = err instanceof Error && err.name === 'AbortError'
       const msg = err instanceof Error ? err.message : String(err)
