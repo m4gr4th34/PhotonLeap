@@ -12,7 +12,7 @@ import type { AgentTransaction, SurfaceDelta, AgentModel } from '../types/agent'
 import { config } from '../config'
 import { traceOpticalStack } from '../api/trace'
 import type { AgentSessionState, EpisodicMemory } from './agentSession'
-import { getStateDelta, updateSessionAfterRequest, updateEpisodic, resetEpisodicGoal, pruneSmallTalk } from './agentSession'
+import { getStateDelta, updateSessionAfterRequest, updateEpisodic, resetEpisodicGoal, pruneSmallTalk, PHYSICS_CONSTRAINTS } from './agentSession'
 import { routeModel, ROUTING_ENABLED } from './agentRouter'
 
 /** Check if we have an API key for the given model. Router must not override to a model we can't use. */
@@ -75,6 +75,18 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 - |radius| >= diameter to avoid knife-edges (impossible curves)
 - If design fails (RMS too high), you will receive error context; propose a new transaction.`
 
+/** Optical Physics Constants — static, cacheable (~200 tokens). Never changes. */
+const OPTICAL_PHYSICS_CONSTANTS = `
+## Physics Constants (immutable)
+- Snell: n₁sin(θ₁)=n₂sin(θ₂). TIR when θ ≥ arcsin(n₂/n₁).
+- Lensmaker (thin): 1/f = (n-1)(1/R₁ - 1/R₂).
+- RMS threshold: ${config.agentRmsThresholdUm} μm. |radius| ≥ diameter. thickness > 0.
+- Glass library: N-BK7, N-SF11, Fused Silica, N-SF5, N-SF6, N-SF10, N-SF14, N-F2, N-SK2, N-BAF10, N-LAK9, H-LAF7, Calcium Fluoride, Magnesium Fluoride, Sapphire, N-K5, N-SK16, N-BAF4, N-SF6HT, N-LAK14, N-BK10, N-SF57, N-SF66, N-SF15.
+`
+
+/** ACE: Cacheable prefix — System Identity + Constants. First ~1000 tokens, never changes. */
+const ACE_CACHEABLE_PREFIX = PHYSICIST_SYSTEM_PROMPT + OPTICAL_PHYSICS_CONSTANTS
+
 /** Physics Validator: intercepts AI-generated designs. If agent proposes lens violating Conservation of Energy
  * (e.g. gain without pump), or RMS exceeds threshold, feeds error back to agent for second pass. */
 
@@ -117,7 +129,7 @@ export function buildSystemMessage(
         }
       : null,
   }
-  return `${PHYSICIST_SYSTEM_PROMPT}\n\n## Current System State (JSON)\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``
+  return `${ACE_CACHEABLE_PREFIX}\n\n## Current System State (JSON)\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``
 }
 
 /** Build system message from state delta (token-efficient: handshake once, then delta-only). */
@@ -126,12 +138,13 @@ export function buildSystemMessageFromDelta(
   isHandshake: boolean,
   episodic: EpisodicMemory
 ): string {
+  /** Differential Memory: Context Summary only — no full chat history */
   const episodicBlock =
     episodic.currentGoal || episodic.constraintsMet.length || episodic.failedIterations.length
-      ? `\n## Episodic Memory\n- Current Goal: ${episodic.currentGoal || 'None'}\n- Constraints Met: ${episodic.constraintsMet.join('; ') || 'None'}\n- Failed Iterations: ${episodic.failedIterations.join('; ') || 'None'}`
+      ? `\n## Context Summary\n- Current Goal: ${episodic.currentGoal || 'None'}\n- Constraints Met: ${episodic.constraintsMet.join('; ') || 'None'}\n- Failed Iterations: ${episodic.failedIterations.join('; ') || 'None'}\n- Physics Constraints: ${PHYSICS_CONSTRAINTS}`
       : ''
   const label = isHandshake ? 'Full Handshake (JSON)' : 'State Delta (compact)'
-  return `${PHYSICIST_SYSTEM_PROMPT}${episodicBlock}\n\n## ${label}\n\`\`\`json\n${JSON.stringify(delta)}\n\`\`\``
+  return `${ACE_CACHEABLE_PREFIX}${episodicBlock}\n\n## ${label}\n\`\`\`json\n${JSON.stringify(delta)}\n\`\`\``
 }
 
 /** Strip <think>...</think> blocks (DeepSeek R1, LM Studio reasoning models) — keep only content after for parsing.
@@ -300,6 +313,15 @@ function getLocalModelId(model: string): string {
   return model?.trim() || config.localAgent.modelId
 }
 
+/** ACE: Split system into cacheable prefix (~1000 tokens) + variable. Anthropic prompt caching. */
+function buildAnthropicSystemWithCache(systemMessage: string): unknown {
+  const variablePart = systemMessage.slice(ACE_CACHEABLE_PREFIX.length)
+  return [
+    { type: 'text' as const, text: ACE_CACHEABLE_PREFIX, cache_control: { type: 'ephemeral' as const } },
+    { type: 'text' as const, text: variablePart },
+  ]
+}
+
 /** Stream Anthropic Messages API — thinking_delta or text_delta to onThinking, returns full text */
 async function callAnthropicStreaming(
   apiKey: string,
@@ -314,7 +336,7 @@ async function callAnthropicStreaming(
     model,
     max_tokens: 2048,
     stream: true,
-    system: systemMessage,
+    system: buildAnthropicSystemWithCache(systemMessage),
     messages: [{ role: 'user', content: userMessage }],
   }
   if (enableThinking) {
@@ -748,7 +770,7 @@ async function callLLM(
       body: JSON.stringify({
         model,
         max_tokens: 2048,
-        system: systemMessage,
+        system: buildAnthropicSystemWithCache(systemMessage),
         messages: [{ role: 'user', content: userMessage }],
       }),
     })
@@ -917,6 +939,12 @@ export async function runAgent(
   let lastTransaction: AgentTransaction | null = null
   let lastError = ''
 
+  /** Neuro-Symbolic: baseline RMS before agent changes (Verification Hook) */
+  const baselineRmsUm =
+    state.traceResult?.performance?.rmsSpotRadius != null
+      ? state.traceResult.performance.rmsSpotRadius * 1000
+      : null
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     onThinkingClear?.()
     onProgress?.(attempt === 0 ? 'Thinking...' : `Retrying (${attempt + 1}/${maxRetries})...`)
@@ -1012,6 +1040,13 @@ export async function runAgent(
     const rmsUm = traceResult?.performance?.rmsSpotRadius != null
       ? traceResult.performance.rmsSpotRadius * 1000
       : 0
+
+    /** Verification Hook: reject if RMS increased (design degraded) */
+    if (baselineRmsUm != null && rmsUm > baselineRmsUm) {
+      lastError = `Design rejected: RMS increased from ${baselineRmsUm.toFixed(1)} to ${rmsUm.toFixed(1)} μm. Please refine.`
+      if (session) updateEpisodic(session, { failedIterations: [lastError] })
+      continue
+    }
 
     if (rmsUm <= rmsThresholdUm) {
       if (session) {

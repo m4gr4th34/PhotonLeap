@@ -22,6 +22,8 @@ export type AgentSessionState = {
   handshakeSent: boolean
   /** Last known surfaces (for delta computation) */
   lastSurfaces: Surface[]
+  /** Last valid stack — surfaces that passed trace (Verification Hook) */
+  lastValidStack: Surface[]
   /** Last known trace performance */
   lastRmsUm: number | null
   /** Episodic summary — condenses chat/retry history */
@@ -32,6 +34,7 @@ export function createAgentSession(): AgentSessionState {
   return {
     handshakeSent: false,
     lastSurfaces: [],
+    lastValidStack: [],
     lastRmsUm: null,
     episodic: {
       currentGoal: '',
@@ -40,6 +43,9 @@ export function createAgentSession(): AgentSessionState {
     },
   }
 }
+
+/** Physics constraints string for Context Summary */
+export const PHYSICS_CONSTRAINTS = 'RMS ≤ 1000 μm; |radius| ≥ diameter; thickness > 0; radius ≠ 0 for Glass'
 
 /** Surface fields we track for delta (only send if changed) */
 const SURFACE_DELTA_KEYS = ['radius', 'thickness', 'refractiveIndex', 'diameter', 'material', 'description', 'coating', 'type'] as const
@@ -161,6 +167,7 @@ export function updateSessionAfterRequest(
 ): void {
   session.handshakeSent = true
   session.lastSurfaces = surfaces.map((s) => ({ ...s }))
+  session.lastValidStack = surfaces.map((s) => ({ ...s }))
   session.lastRmsUm =
     traceResult?.performance?.rmsSpotRadius != null
       ? traceResult.performance.rmsSpotRadius * 1000

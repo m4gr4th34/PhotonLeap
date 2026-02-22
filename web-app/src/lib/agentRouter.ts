@@ -1,12 +1,13 @@
 /**
- * Hybrid Model Router — Brain-Body Split.
- * Routes reasoning-heavy tasks to DeepSeek-Reasoner, simple edits to cheaper models.
+ * v3.2 Model Tiering — cost-efficient routing.
+ * Simple Physics → DeepSeek-Chat (V3). Complex Optimization → DeepSeek-Reasoner (R1).
+ * Keeps $5 balance lasting for months.
  */
 
 import type { AgentModel } from '../types/agent'
 
-/** Keywords that indicate reasoning/optimization (use Reasoner). */
-const REASONING_KEYWORDS = [
+/** Keywords that indicate complex optimization (use Reasoner R1). */
+const COMPLEX_OPTIMIZATION_KEYWORDS = [
   'optimize', 'optimization', 'minimize', 'maximize', 'zero coma', 'zero spherical',
   'aberration', 'seidel', 'strehl', 'rms', 'best focus', 'optimise',
   'design a', 'design an', 'create a', 'create an', 'suggest', 'recommend',
@@ -14,8 +15,8 @@ const REASONING_KEYWORDS = [
   'why', 'explain', 'how does', 'what if', 'compare',
 ]
 
-/** Keywords that indicate simple parametric change (use Chat/Mini). */
-const SIMPLE_KEYWORDS = [
+/** Keywords that indicate simple parametric change (use Chat V3). */
+const SIMPLE_PHYSICS_KEYWORDS = [
   'thicker', 'thinner', 'make lens', 'change', 'set', 'update',
   'radius', 'thickness', 'diameter', 'material', 'glass',
   'lens 1', 'lens 2', 'surface 1', 'surface 2', 'first lens', 'second lens',
@@ -23,22 +24,22 @@ const SIMPLE_KEYWORDS = [
 ]
 
 /**
- * Classify user prompt and return recommended model.
- * Reasoning → DeepSeek-Reasoner (or o1). Simple → DeepSeek-Chat or GPT-4o-mini.
+ * Route by complexity: Simple Physics → DeepSeek-Chat, Complex Optimization → DeepSeek-Reasoner.
+ * Only overrides when user selected model is DeepSeek (or we have DeepSeek key and user chose a DeepSeek-capable flow).
  */
 export function routeModel(prompt: string, userSelectedModel: AgentModel): AgentModel {
   const lower = prompt.toLowerCase().trim()
 
-  const hasReasoning = REASONING_KEYWORDS.some((k) => lower.includes(k))
-  const hasSimple = SIMPLE_KEYWORDS.some((k) => lower.includes(k))
+  const hasComplex = COMPLEX_OPTIMIZATION_KEYWORDS.some((k) => lower.includes(k))
+  const hasSimple = SIMPLE_PHYSICS_KEYWORDS.some((k) => lower.includes(k))
 
-  if (hasReasoning && !hasSimple) {
+  if (hasComplex && !hasSimple) {
     return 'deepseek-reasoner'
   }
-  if (hasSimple && !hasReasoning) {
-    return 'gpt-4o-mini'
+  if (hasSimple && !hasComplex) {
+    return 'deepseek-chat'
   }
-  if (hasSimple && hasReasoning) {
+  if (hasSimple && hasComplex) {
     return 'deepseek-reasoner'
   }
 
