@@ -4,7 +4,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X, Shield, ShieldAlert } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X, Shield, ShieldAlert, RefreshCw } from 'lucide-react'
+import { config } from '../config'
 import type { SystemState } from '../types/system'
 import type { AgentModel, AgentModelInfo, ImageAttachment } from '../types/agent'
 import { runAgent, buildSystemMessage, type ValidationReport } from '../lib/agentOrchestrator'
@@ -61,6 +63,9 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
   const [imageError, setImageError] = useState<string | null>(null)
   const [physicsViolations, setPhysicsViolations] = useState<ValidationReport | null>(null)
+  const [newSessionConfirmOpen, setNewSessionConfirmOpen] = useState(false)
+  const [newSessionToast, setNewSessionToast] = useState(false)
+  const [newSessionJustReset, setNewSessionJustReset] = useState(false)
   const draftRef = useRef('')
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
@@ -247,6 +252,29 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
     abortControllerRef.current?.abort()
   }, [])
 
+  const handleNewSessionClick = useCallback(() => {
+    setNewSessionConfirmOpen(true)
+  }, [])
+
+  const handleNewSessionConfirm = useCallback(() => {
+    sessionRef.current = createAgentSession()
+    setNewSessionConfirmOpen(false)
+    setNewSessionToast(true)
+    setNewSessionJustReset(true)
+  }, [])
+
+  useEffect(() => {
+    if (!newSessionToast) return
+    const t = setTimeout(() => setNewSessionToast(false), config.toastDuration)
+    return () => clearTimeout(t)
+  }, [newSessionToast])
+
+  useEffect(() => {
+    if (!newSessionJustReset) return
+    const t = setTimeout(() => setNewSessionJustReset(false), 1200)
+    return () => clearTimeout(t)
+  }, [newSessionJustReset])
+
   return (
     <div className="h-full flex flex-col bg-slate-900/50 rounded-lg border border-white/10 overflow-hidden">
       <div className="px-4 py-3 border-b border-white/10">
@@ -352,17 +380,29 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
             </p>
           )}
           {(hasApiKey || localMode) && (
-            <button
-              type="button"
-              onClick={() => {
-                setUplinkRequiredMessage(null)
-                setUplinkOpen(true)
-              }}
-              className="text-slate-500 hover:text-cyan-electric text-xs mt-1 flex items-center gap-1"
-            >
-              <KeyRound className="w-3 h-3" />
-              {localMode ? 'Manage keys & models' : 'Manage keys'}
-            </button>
+            <div className="flex items-center gap-3 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setUplinkRequiredMessage(null)
+                  setUplinkOpen(true)
+                }}
+                className="text-slate-500 hover:text-cyan-electric text-xs flex items-center gap-1"
+              >
+                <KeyRound className="w-3 h-3" />
+                {localMode ? 'Manage keys & models' : 'Manage keys'}
+              </button>
+              <button
+                type="button"
+                onClick={handleNewSessionClick}
+                disabled={!!progress}
+                className={`text-slate-500 hover:text-cyan-electric text-xs flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${newSessionJustReset ? 'text-cyan-electric' : ''}`}
+                title="Start fresh — clear episodic memory and context"
+              >
+                <RefreshCw className={`w-3 h-3 ${newSessionJustReset ? 'animate-spin' : ''}`} />
+                New Session
+              </button>
+            </div>
           )}
         </div>
 
