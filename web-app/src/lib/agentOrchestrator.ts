@@ -119,7 +119,6 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 {"physicsViolation":true,"reason":"description","suggestedAlternative":"geometry hint","surfaceDeltas":[],"reasoning":"..."}
 
 ## Constraints
-- radius must be non-zero for Glass surfaces
 - thickness > 0, diameter > 0
 - |radius| >= diameter to avoid knife-edges (impossible curves)
 - If design fails physical validation, you will receive error context; propose a new transaction.`
@@ -320,9 +319,6 @@ export function applyTransaction(surfaces: Surface[], transaction: AgentTransact
 export function validateTransaction(surfaces: Surface[], transaction: AgentTransaction): { valid: boolean; error?: string } {
   const after = applyTransaction(surfaces, transaction)
   for (const s of after) {
-    if (s.type === 'Glass' && s.radius === 0) {
-      return { valid: false, error: `Surface ${s.id} (Glass) cannot have radius 0` }
-    }
     if (s.thickness < 0) {
       return { valid: false, error: `Surface ${s.id} has negative thickness` }
     }
@@ -665,8 +661,10 @@ async function callOpenAIStreaming(
   return fullContent
 }
 
-/** Stream DeepSeek Chat Completions — reasoning_content or content to onThinking.
- * Progressive max_tokens: 16K → 32K → 64K on retries so complex reasoning can complete. */
+/** DeepSeek API max_tokens limit (Reasoner: 8192; Chat may allow more). Cap to stay within API limits. */
+const DEEPSEEK_MAX_TOKENS = 8192
+
+/** Stream DeepSeek Chat Completions — reasoning_content or content to onThinking. */
 async function callDeepSeekStreaming(
   apiKey: string,
   model: string,
@@ -674,10 +672,10 @@ async function callDeepSeekStreaming(
   userMessage: string,
   onThinking: (chunk: string) => void,
   signal?: AbortSignal,
-  attempt = 0,
+  _attempt = 0,
   images?: ImageAttachment[]
 ): Promise<string> {
-  const maxTokens = Math.min(16384 * (1 << Math.min(attempt, 2)), 65536)
+  const maxTokens = DEEPSEEK_MAX_TOKENS
   const userContent = buildUserContentOpenAI(userMessage, images)
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
@@ -1082,8 +1080,7 @@ async function callLLM(
     if (onThinking) {
       return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal, attempt ?? 0, images)
     }
-    const attemptNum = attempt ?? 0
-    const maxTokens = Math.min(16384 * (1 << Math.min(attemptNum, 2)), 65536)
+    const maxTokens = DEEPSEEK_MAX_TOKENS
     const userContent = buildUserContentOpenAI(userMessage, images)
     const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',

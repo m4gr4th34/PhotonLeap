@@ -46,7 +46,7 @@ export function createAgentSession(): AgentSessionState {
 
 /** Physics constraints string for Context Summary */
 export const PHYSICS_CONSTRAINTS =
-  'Physical invariants: |radius| ≥ diameter; thickness > 0; radius ≠ 0 for Glass; n ≥ 1; thickness ≤ |radius|×2; aspect ratio ≤ 20; total length ≤ bench limit'
+  'Physical invariants: |radius| ≥ diameter; thickness > 0; n ≥ 1; thickness ≤ |radius|×2; aspect ratio ≤ 20; total length ≤ bench limit'
 
 /** Surface fields we track for delta (only send if changed) */
 const SURFACE_DELTA_KEYS = ['radius', 'thickness', 'refractiveIndex', 'diameter', 'material', 'description', 'coating', 'type'] as const
