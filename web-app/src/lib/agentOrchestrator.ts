@@ -284,6 +284,208 @@ function getLocalModelId(model: string): string {
   return model?.trim() || config.localAgent.modelId
 }
 
+/** Stream Anthropic Messages API — thinking_delta or text_delta to onThinking, returns full text */
+async function callAnthropicStreaming(
+  apiKey: string,
+  model: string,
+  systemMessage: string,
+  userMessage: string,
+  onThinking: (chunk: string) => void,
+  signal?: AbortSignal,
+  enableThinking?: boolean
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: 2048,
+    stream: true,
+    system: systemMessage,
+    messages: [{ role: 'user', content: userMessage }],
+  }
+  if (enableThinking) {
+    body.thinking = { type: 'enabled', budget_tokens: 4000 }
+  }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Anthropic API error: ${res.status} ${err}`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        try {
+          const data = JSON.parse(raw) as { type?: string; delta?: { type?: string; thinking?: string; text?: string } }
+          if (data.type === 'content_block_delta' && data.delta) {
+            if (data.delta.type === 'thinking_delta' && typeof data.delta.thinking === 'string') {
+              onThinking(data.delta.thinking)
+            } else if (data.delta.type === 'text_delta' && typeof data.delta.text === 'string') {
+              onThinking(data.delta.text)
+              fullText += data.delta.text
+            }
+          }
+        } catch {
+          // skip malformed JSON
+        }
+      }
+    }
+  }
+  return fullText
+}
+
+/** Stream OpenAI Chat Completions — content delta to onThinking, returns full content */
+async function callOpenAIStreaming(
+  apiKey: string,
+  model: string,
+  systemMessage: string,
+  userMessage: string,
+  onThinking: (chunk: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: 2048,
+    stream: true,
+    messages: [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: userMessage },
+    ],
+  }
+  if (model.startsWith('o1')) body.reasoning_effort = 'medium'
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`OpenAI API error: ${res.status} ${err}`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullContent = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        try {
+          const data = JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }> }
+          const delta = data.choices?.[0]?.delta
+          if (delta) {
+            if (typeof delta.reasoning_content === 'string') {
+              onThinking(delta.reasoning_content)
+            }
+            if (typeof delta.content === 'string') {
+              onThinking(delta.content)
+              fullContent += delta.content
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+  return fullContent
+}
+
+/** Stream DeepSeek Chat Completions — reasoning_content or content to onThinking */
+async function callDeepSeekStreaming(
+  apiKey: string,
+  model: string,
+  systemMessage: string,
+  userMessage: string,
+  onThinking: (chunk: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      stream: true,
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage },
+      ],
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`DeepSeek API error: ${res.status} ${err}`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullContent = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        try {
+          const data = JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }> }
+          const delta = data.choices?.[0]?.delta
+          if (delta) {
+            if (typeof delta.reasoning_content === 'string') {
+              onThinking(delta.reasoning_content)
+            }
+            if (typeof delta.content === 'string') {
+              onThinking(delta.content)
+              fullContent += delta.content
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+  return fullContent
+}
+
 /** Stream LLM via LM Studio native API — emits reasoning in real time, returns full message text */
 async function callLLMStreaming(
   model: AgentModel | string,
@@ -418,6 +620,10 @@ async function callLLM(
 
   if (model.startsWith('claude')) {
     if (!anthropicApiKey) throw new Error('API key required for Anthropic. Add your key in Agent Uplink.')
+    const supportsThinking = /claude-(opus-4|sonnet-4|haiku-4|3-7-sonnet)/.test(model)
+    if (onThinking) {
+      return callAnthropicStreaming(anthropicApiKey, model, systemMessage, userMessage, onThinking, signal, supportsThinking)
+    }
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -444,6 +650,9 @@ async function callLLM(
 
   if (model.startsWith('gpt') || model.startsWith('o1')) {
     if (!openaiApiKey) throw new Error('API key required for OpenAI. Add your key in Agent Uplink.')
+    if (onThinking) {
+      return callOpenAIStreaming(openaiApiKey, model, systemMessage, userMessage, onThinking, signal)
+    }
     const body: Record<string, unknown> = {
       model,
       max_tokens: 2048,
@@ -475,6 +684,9 @@ async function callLLM(
 
   if (model.startsWith('deepseek')) {
     if (!deepseekApiKey) throw new Error('API key required for DeepSeek. Add your key in Agent Uplink.')
+    if (onThinking) {
+      return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal)
+    }
     const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       signal,

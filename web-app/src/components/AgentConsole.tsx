@@ -133,8 +133,8 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
         onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: surfaces }))
       },
       localMode,
-      onThinking: localMode ? (chunk) => setThinkingStream((prev) => prev + chunk) : undefined,
-      onThinkingClear: localMode ? () => setThinkingStream('') : undefined,
+      onThinking: (chunk) => setThinkingStream((prev) => prev + chunk),
+      onThinkingClear: () => setThinkingStream(''),
       signal: ac.signal,
       session: sessionRef.current,
       useRouter: !localMode,
