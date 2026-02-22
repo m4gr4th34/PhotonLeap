@@ -26,6 +26,7 @@ function hasKeyForModel(model: string, apiKeys?: { openai?: string; anthropic?: 
 
 import { parseJsonPatch, patchToSurfaceDeltasById } from './jsonPatch'
 import { appendThoughtTrace } from './thoughtTrace'
+import { enrichSurfaceWithPhysics } from './latticePhysics'
 
 /** PhotonLeap Physicist System Identity — transforms general-purpose LLM into Optical & Quantum Architect */
 const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an expert in classical ray optics, wave propagation, and quantum information science. Your goal is to design, optimize, and troubleshoot physical systems within the PhotonLeap environment.
@@ -40,9 +41,11 @@ const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an
 - Metric-Driven Design: When asked to optimize, minimize the Root Mean Square (RMS) spot size or maximize the Strehl Ratio.
 - Manufacturing Awareness: Favor "buildable" designs. Avoid center thicknesses <1mm or curvatures that create "knife-edges" on lens peripheries. |radius| must be >= diameter to avoid impossible curves.
 
-## Optical Stack Schema (input context)
+## Optical Stack Schema (Dual-Purpose Semantic Lattice)
 Each surface has:
 - id (string, required): unique identifier — MUST match existing surface ids exactly
+- semanticName (string): e.g. "Primary_Objective", "Field_Flattener"
+- aiContext (string): reason for surface, e.g. "Corrects coma from S1"
 - type: "Glass" | "Air"
 - radius (mm): curvature radius; positive = convex toward +z, negative = concave; 0 = flat
 - thickness (mm): distance to next surface
@@ -50,6 +53,8 @@ Each surface has:
 - diameter (mm): clear aperture
 - material (string): must be from glass library
 - description, coating
+- effective_focal_length (mm): computed R/(n-1) for curved surfaces; null for plano
+- critical_angle (deg): TIR angle for glass→air; null for air
 
 ## Glass Library (exact names)
 N-BK7, N-SF11, N-SF5, N-SF6, N-SF10, N-SF14, N-F2, N-SK2, Fused Silica, N-BAF10, N-LAK9, H-LAF7, Calcium Fluoride, Magnesium Fluoride, Sapphire, N-K5, N-SK16, N-BAF4, N-SF6HT, N-LAK14, N-BK10, N-SF57, N-SF66, N-SF15
@@ -80,17 +85,24 @@ export function buildSystemMessage(
 ): string {
   const ctx = {
     optical_stack: {
-      surfaces: optical_stack.surfaces.map((s) => ({
-        id: s.id,
-        type: s.type,
-        radius: s.radius,
-        thickness: s.thickness,
-        refractiveIndex: s.refractiveIndex,
-        diameter: s.diameter,
-        material: s.material,
-        description: s.description,
-        coating: s.coating,
-      })),
+      surfaces: optical_stack.surfaces.map((s) => {
+        const enriched = enrichSurfaceWithPhysics(s)
+        return {
+          id: enriched.id,
+          semanticName: enriched.semanticName ?? `S${optical_stack.surfaces.indexOf(s) + 1}`,
+          aiContext: enriched.aiContext ?? '',
+          type: enriched.type,
+          radius: enriched.radius,
+          thickness: enriched.thickness,
+          refractiveIndex: enriched.refractiveIndex,
+          diameter: enriched.diameter,
+          material: enriched.material,
+          description: enriched.description,
+          coating: enriched.coating,
+          effective_focal_length: enriched.effective_focal_length ?? null,
+          critical_angle: enriched.critical_angle ?? null,
+        }
+      }),
       entrancePupilDiameter: optical_stack.entrancePupilDiameter,
       wavelengths: optical_stack.wavelengths,
       fieldAngles: optical_stack.fieldAngles,
@@ -228,6 +240,8 @@ export function applyTransaction(surfaces: Surface[], transaction: AgentTransact
   for (const delta of transaction.surfaceDeltas) {
     const surf = byId.get(delta.id)
     if (!surf) continue
+    if (delta.semanticName !== undefined) surf.semanticName = delta.semanticName
+    if (delta.aiContext !== undefined) surf.aiContext = delta.aiContext
     if (delta.radius !== undefined) surf.radius = delta.radius
     if (delta.thickness !== undefined) surf.thickness = delta.thickness
     if (delta.refractiveIndex !== undefined) surf.refractiveIndex = delta.refractiveIndex
@@ -529,7 +543,55 @@ async function callDeepSeekStreaming(
   return fullContent
 }
 
-/** Stream LLM via LM Studio native API — emits reasoning in real time, returns full message text */
+/** Parse <think>...</think> blocks from message stream — used when LM Studio doesn't emit reasoning.delta (e.g. grok-3-gemma3-12b) */
+function parseThinkBlocks(
+  chunk: string,
+  state: { inThink: boolean; pending: string },
+  onThinking: (chunk: string) => void
+): string {
+  const s = state.pending + chunk
+  state.pending = ''
+  let messagePart = ''
+  if (state.inThink) {
+    const endIdx = s.indexOf('</think>')
+    if (endIdx >= 0) {
+      onThinking(s.slice(0, endIdx))
+      messagePart = s.slice(endIdx + 8)
+      state.inThink = false
+      const recurse = parseThinkBlocks(messagePart, state, onThinking)
+      return recurse
+    }
+    onThinking(s)
+    return ''
+  }
+  const startIdx = s.indexOf('<think>')
+  if (startIdx >= 0) {
+    messagePart = s.slice(0, startIdx)
+    const afterStart = s.slice(startIdx + 8)
+    const endIdx = afterStart.indexOf('</think>')
+    if (endIdx >= 0) {
+      onThinking(afterStart.slice(0, endIdx))
+      return messagePart + parseThinkBlocks(afterStart.slice(endIdx + 8), state, onThinking)
+    }
+    state.inThink = true
+    onThinking(afterStart)
+    return messagePart
+  }
+  const lastStart = s.lastIndexOf('<think>')
+  if (lastStart >= 0 && lastStart > s.length - 8) {
+    state.pending = s.slice(lastStart)
+    return s.slice(0, lastStart)
+  }
+  const lastEnd = s.lastIndexOf('</think>')
+  if (lastEnd >= 0 && lastEnd > s.length - 8) {
+    state.pending = s.slice(lastEnd)
+    return s.slice(0, lastEnd)
+  }
+  return s
+}
+
+/** Stream LLM via LM Studio native API — emits reasoning in real time, returns full message text.
+ * Supports: (1) reasoning.delta events, (2) <think>...</think> in message.delta (grok-3-gemma3-12b, etc.) */
 async function callLLMStreaming(
   model: AgentModel | string,
   systemMessage: string,
@@ -563,6 +625,8 @@ async function callLLMStreaming(
   const decoder = new TextDecoder()
   let buffer = ''
   let fullMessage = ''
+  const thinkState = { inThink: false, pending: '' }
+  let hasReasoningDelta = false
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -576,9 +640,14 @@ async function callLLMStreaming(
         try {
           const data = JSON.parse(raw) as { type?: string; content?: string; result?: { output?: Array<{ type: string; content?: string }> } }
           if (data.type === 'reasoning.delta' && typeof data.content === 'string') {
+            hasReasoningDelta = true
             onThinking(data.content)
           } else if (data.type === 'message.delta' && typeof data.content === 'string') {
-            fullMessage += data.content
+            if (hasReasoningDelta) {
+              fullMessage += data.content
+            } else {
+              fullMessage += parseThinkBlocks(data.content, thinkState, onThinking)
+            }
           } else if (data.type === 'chat.end' && data.result?.output) {
             fullMessage = ''
             for (const item of data.result.output) {

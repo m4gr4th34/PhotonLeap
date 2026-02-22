@@ -11,6 +11,7 @@ import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
 import { createAgentSession } from '../lib/agentSession'
 import { useAgents } from '../contexts/AgentKeysContext'
 import { UplinkModal } from './UplinkModal'
+import type { SemanticDelta } from '../lib/latticePhysics'
 
 /** Agent Grid — role-based model recommendations for physics tasks */
 const AGENT_MODELS: AgentModelInfo[] = [
@@ -35,9 +36,12 @@ type AgentConsoleProps = {
   onSystemStateChange: (state: SystemState | ((prev: SystemState) => SystemState)) => void
   /** Ghost surfaces for preview (Phase 3.2) — not used yet */
   ghostSurfaces?: SystemState['surfaces'] | null
+  /** Recent semantic deltas from user edits (physical implications) — injected into prompt */
+  recentSemanticDeltas?: SemanticDelta[]
+  onClearSemanticDeltas?: () => void
 }
 
-export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleProps) {
+export function AgentConsole({ systemState, onSystemStateChange, recentSemanticDeltas = [], onClearSemanticDeltas }: AgentConsoleProps) {
   const { keys, setKeys, clearAllKeys, localMode, setLocalMode, localModels, setLocalModels } = useAgents()
   const [uplinkOpen, setUplinkOpen] = useState(false)
   const [uplinkRequiredMessage, setUplinkRequiredMessage] = useState<string | null>(null)
@@ -52,10 +56,15 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const [thinkingStream, setThinkingStream] = useState<string>('')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [localOfflineWarning, setLocalOfflineWarning] = useState(false)
+  const [commandHistory, setCommandHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const draftRef = useRef('')
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const sessionRef = useRef(createAgentSession())
+
+  const MAX_COMMAND_HISTORY = 50
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
@@ -98,7 +107,8 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const effectiveModel = localMode ? localModel : model
 
   const handleSend = useCallback(async () => {
-    if (!prompt.trim()) return
+    const cmd = prompt.trim()
+    if (!cmd) return
     if (!hasApiKey) {
       if (localMode) {
         setUplinkRequiredMessage('Local Mode: Add at least one model name in Agent Uplink (Manage keys) to proceed.')
@@ -120,11 +130,23 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     setErrorMessage(null)
     setThinkingStream('')
     setLocalOfflineWarning(false)
+    setPrompt('')
+    draftRef.current = ''
+    setHistoryIndex(-1)
+    setCommandHistory((prev) => {
+      const next = [cmd, ...prev.filter((c) => c !== cmd)].slice(0, MAX_COMMAND_HISTORY)
+      return next
+    })
 
     const ac = new AbortController()
     abortControllerRef.current = ac
 
-    const result = await runAgent(systemState, prompt.trim(), {
+    const userPrompt =
+      recentSemanticDeltas.length > 0
+        ? `[Recent edits: ${recentSemanticDeltas.map((d) => d.physicalImplication).join('; ')}]\n\n${cmd}`
+        : cmd
+
+    const result = await runAgent(systemState, userPrompt, {
       model: effectiveModel as AgentModel,
       maxRetries: 3,
       onProgress: setProgress,
@@ -144,6 +166,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     setProgress(null)
 
     if (result.success) {
+      onClearSemanticDeltas?.()
       setLastResult('success')
       setLastReasoning(result.transaction.reasoning ?? null)
       const tr = result.traceResult
@@ -179,7 +202,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       if (result.localUnreachable) setLocalOfflineWarning(true)
       onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: null }))
     }
-  }, [prompt, model, localModel, effectiveModel, hasApiKey, systemState, onSystemStateChange, keys, localMode])
+  }, [prompt, model, localModel, effectiveModel, hasApiKey, systemState, onSystemStateChange, keys, localMode, recentSemanticDeltas, onClearSemanticDeltas])
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -341,22 +364,64 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
           </div>
         )}
 
-        {/* Command input */}
+        {/* Recent commands — elegantly shown above input */}
+        {commandHistory.length > 0 && (
+          <div className="space-y-1.5">
+            <label className="block text-slate-400 text-xs font-medium">Recent commands</label>
+            <div className="space-y-1 max-h-24 overflow-y-auto">
+              {commandHistory.slice(0, 5).map((cmd, i) => (
+                <div
+                  key={`${i}-${cmd.slice(0, 20)}`}
+                  className="px-3 py-2 rounded-lg bg-slate-800/60 border border-white/5 text-slate-300 text-sm font-mono leading-relaxed truncate"
+                  title={cmd}
+                >
+                  <span className="text-cyan-electric/70 text-xs mr-2">›</span>
+                  {cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Command input — Up/Down for history */}
         <div>
           <label className="block text-slate-400 text-xs font-medium mb-1.5">Command</label>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value)
+              if (historyIndex >= 0) setHistoryIndex(-1)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 if (prompt.trim()) handleSend()
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                if (commandHistory.length === 0) return
+                if (historyIndex === -1) draftRef.current = prompt
+                const next = Math.min(historyIndex + 1, commandHistory.length - 1)
+                setHistoryIndex(next)
+                setPrompt(commandHistory[next])
+                return
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                if (historyIndex <= -1) return
+                const next = historyIndex - 1
+                setHistoryIndex(next)
+                setPrompt(next >= 0 ? commandHistory[next] : draftRef.current)
               }
             }}
             placeholder="e.g. Design a beam expander for 532nm laser, 50mm tube length"
             rows={4}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 focus:shadow-[0_0_8px_rgba(34,211,238,0.25)] resize-none"
           />
+          {commandHistory.length > 0 && (
+            <p className="text-slate-500 text-[10px] mt-1">↑↓ to browse previous commands</p>
+          )}
         </div>
 
         {/* Context injection (collapsible) */}

@@ -4,6 +4,7 @@
  */
 
 import type { Surface, TraceResult } from '../types/system'
+import { enrichSurfaceWithPhysics } from './latticePhysics'
 
 /** Trace result or API response (performance/focusZ optional) */
 type TraceLike = TraceResult | { focusZ?: number; bestFocusZ?: number; performance?: { rmsSpotRadius?: number; totalLength?: number; fNumber?: number }; gaussianBeam?: TraceResult['gaussianBeam'] } | null
@@ -71,17 +72,24 @@ export function getStateDelta(
       isHandshake: true,
       delta: {
         optical_stack: {
-          surfaces: surfaces.map((s) => ({
-            id: s.id,
-            type: s.type,
-            radius: s.radius,
-            thickness: s.thickness,
-            refractiveIndex: s.refractiveIndex,
-            diameter: s.diameter,
-            material: s.material,
-            description: s.description,
-            coating: s.coating,
-          })),
+          surfaces: surfaces.map((s, i) => {
+            const enriched = enrichSurfaceWithPhysics(s)
+            return {
+              id: enriched.id,
+              semanticName: enriched.semanticName ?? `S${i + 1}`,
+              aiContext: enriched.aiContext ?? '',
+              type: enriched.type,
+              radius: enriched.radius,
+              thickness: enriched.thickness,
+              refractiveIndex: enriched.refractiveIndex,
+              diameter: enriched.diameter,
+              material: enriched.material,
+              description: enriched.description,
+              coating: enriched.coating,
+              effective_focal_length: enriched.effective_focal_length ?? null,
+              critical_angle: enriched.critical_angle ?? null,
+            }
+          }),
           entrancePupilDiameter: opticalMeta.entrancePupilDiameter,
           wavelengths: opticalMeta.wavelengths,
           fieldAngles: opticalMeta.fieldAngles,

@@ -23,6 +23,8 @@ export type AgentBridgeCall = (
 /** Partial surface update — only specified fields are applied */
 export type SurfaceDelta = {
   id: string
+  semanticName?: string
+  aiContext?: string
   radius?: number
   thickness?: number
   refractiveIndex?: number

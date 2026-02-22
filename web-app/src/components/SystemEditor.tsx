@@ -10,6 +10,7 @@ import { fetchCoatings, COATINGS_FALLBACK, fetchReflectivityCurve, getCoatingSwa
 import { ReflectivityCurveGraph } from './ReflectivityCurveGraph'
 import { importLensSystem } from '../api/importLens'
 import { toLensX, parseLensXFile, type CustomCoatingData } from '../lib/lensX'
+import { computeSemanticDeltaImplication, type SemanticDelta } from '../lib/latticePhysics'
 
 /** Initial state before fetchMaterials resolves; fetchMaterials loads full list from API or glass_library.json */
 const GLASS_LIBRARY_FALLBACK: MaterialOption[] = [
@@ -28,6 +29,8 @@ type SystemEditorProps = {
   onSelectSurface: (id: string | null) => void
   /** Per-surface sensitivity from Monte Carlo (higher = more failure impact) */
   sensitivityBySurface?: number[] | null
+  /** Emitted when user edits a surface — includes physical implication for AI context */
+  onSemanticDelta?: (delta: SemanticDelta) => void
 }
 
 const inputClass =
@@ -552,6 +555,7 @@ export function SystemEditor({
   selectedSurfaceId,
   onSelectSurface,
   sensitivityBySurface,
+  onSemanticDelta,
 }: SystemEditorProps) {
   const surfaces = systemState.surfaces
   const highSensitivityIndices = getHighSensitivityIndices(sensitivityBySurface)
@@ -796,6 +800,8 @@ export function SystemEditor({
     const d = config.surfaceDefaults
     const newSurface: Surface = {
       id: crypto.randomUUID(),
+      semanticName: `S${index + 1}`,
+      aiContext: '',
       type: 'Air',
       radius: 0,
       thickness: d.thickness,
@@ -827,11 +833,36 @@ export function SystemEditor({
     if (selectedSurfaceId === id) onSelectSurface(null)
   }
 
-  const updateSurface = (id: string, updates: Partial<Surface>) => {
+  const updateSurface = (id: string, updates: Partial<Surface>, primaryField?: string) => {
+    const s = surfaces.find((x) => x.id === id)
+    const i = s != null ? surfaces.indexOf(s) : -1
+    if (s != null && onSemanticDelta && i >= 0) {
+      const skipFields = new Set(['semanticName', 'aiContext'])
+      const keys = (primaryField ? [primaryField] : Object.keys(updates)) as (keyof Surface)[]
+      for (const k of keys) {
+        if (skipFields.has(k as string)) continue
+        const v = updates[k]
+        if (v !== undefined && (s as Record<string, unknown>)[k as string] !== v) {
+          const impl = computeSemanticDeltaImplication(s, k as string, (s as Record<string, unknown>)[k as string], v, i)
+          if (impl) {
+            onSemanticDelta({
+              surfaceId: id,
+              surfaceIndex: i,
+              semanticName: s.semanticName ?? `S${i + 1}`,
+              field: k as string,
+              oldValue: (s as Record<string, unknown>)[k as string],
+              newValue: v,
+              physicalImplication: impl,
+            })
+          }
+          break
+        }
+      }
+    }
     onSystemStateChange((prev) => ({
       ...prev,
-      surfaces: prev.surfaces.map((s) =>
-        s.id === id ? { ...s, ...updates } : s
+      surfaces: prev.surfaces.map((surf) =>
+        surf.id === id ? { ...surf, ...updates } : surf
       ),
       traceResult: null,
       traceError: null,
@@ -916,6 +947,8 @@ export function SystemEditor({
             <tr className="text-left text-slate-400 border-b border-white/10 bg-slate-900/40 backdrop-blur-[4px]">
               <th className="w-8 py-2 pr-1" aria-label="Drag handle" />
               <th className="py-2 pr-4">#</th>
+              <th className="py-2 pr-3" title="Semantic name for AI (e.g. Primary_Objective)">Name</th>
+              <th className="py-2 pr-3" title="AI-Context: reason for this surface">AI Context</th>
               <th className="py-2 pr-4">Type</th>
               <th className="py-2 pr-4">Radius (mm)</th>
               <th className="py-2 pr-4">Thickness (mm)</th>
@@ -944,7 +977,7 @@ export function SystemEditor({
               onClick={addSurfaceAtStart}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={17} className="py-2">
+              <td colSpan={19} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at start
@@ -999,6 +1032,28 @@ export function SystemEditor({
                   <GripVertical className="w-4 h-4" />
                 </td>
                 <td className="py-2 pr-4 text-slate-400">{i + 1}</td>
+                <td className="py-2 pr-3">
+                  <input
+                    type="text"
+                    value={s.semanticName ?? ''}
+                    placeholder={`S${i + 1}`}
+                    onChange={(e) => updateSurface(s.id, { semanticName: e.target.value.trim() || undefined })}
+                    onClick={(e) => e.stopPropagation()}
+                    className={`${inputClass} min-w-[7rem]`}
+                    title="Semantic name for AI context"
+                  />
+                </td>
+                <td className="py-2 pr-3">
+                  <input
+                    type="text"
+                    value={s.aiContext ?? ''}
+                    onChange={(e) => updateSurface(s.id, { aiContext: e.target.value.trim() || undefined })}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder="e.g. Corrects coma from S1"
+                    className={`${inputClass} min-w-[8rem] text-xs`}
+                    title="AI-Context: hidden context describing surface purpose (for AI)"
+                  />
+                </td>
                 <td className="py-2 pr-4">
                   <select
                     value={s.type}
@@ -1068,7 +1123,7 @@ export function SystemEditor({
                         ...(n != null && { refractiveIndex: n }),
                         sellmeierCoefficients: sm,
                         type: material === 'Air' ? 'Air' : 'Glass',
-                      })
+                      }, 'material')
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -1227,7 +1282,7 @@ export function SystemEditor({
               onClick={() => addSurfaceAtIndex(surfaces.length)}
               className="border-b border-dashed border-white/20 cursor-pointer bg-slate-900/30 backdrop-blur-[4px] hover:bg-slate-900/50 text-slate-500 hover:text-cyan-electric transition-colors"
             >
-              <td colSpan={17} className="py-2">
+              <td colSpan={19} className="py-2">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
                   Insert surface at end

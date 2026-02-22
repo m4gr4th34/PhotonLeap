@@ -34,6 +34,10 @@ export interface LensXSurface {
   material: string
   type?: 'Glass' | 'Air'
   description?: string
+  /** Semantic name for Dual-Purpose Lattice (e.g. Primary_Objective) */
+  semantic_name?: string
+  /** AI-Context: reason for surface (e.g. Corrects coma from S1) */
+  ai_context?: string
   physics?: {
     sellmeier?: { B: number[]; C: number[] }
     refractive_index?: number
@@ -151,6 +155,8 @@ export function toLensX(
       material: s.material ?? (s.type === 'Air' ? 'Air' : 'N-BK7'),
       type: s.type ?? (s.refractiveIndex > 1.01 ? 'Glass' : 'Air'),
       description: s.description ?? '',
+      ...(s.semanticName && { semantic_name: s.semanticName }),
+      ...(s.aiContext && { ai_context: s.aiContext }),
       physics: Object.keys(physics).length > 0 ? physics : undefined,
       manufacturing: {
         surface_quality: s.surfaceQuality ?? '3/2',
@@ -282,6 +288,8 @@ export function fromLensX(doc: unknown): FromLensXResult {
       diameter,
       material: isAir ? 'Air' : material,
       description: String(s.description || `Surface ${idx + 1}`),
+      ...(typeof s.semantic_name === 'string' && s.semantic_name && { semanticName: s.semantic_name }),
+      ...(typeof s.ai_context === 'string' && { aiContext: s.ai_context }),
     }
     if (physics.sellmeier && typeof physics.sellmeier === 'object') {
       const sm = physics.sellmeier as { B?: number[]; C?: number[] }

@@ -16,6 +16,7 @@ import {
   type SystemState,
   type Surface,
 } from './types/system'
+import type { SemanticDelta } from './lib/latticePhysics'
 import { config } from './config'
 
 const STORAGE_KEY = 'last_design'
@@ -25,6 +26,8 @@ function normalizeSurface(s: Partial<Surface> & { n?: number }, _i: number): Sur
   const d = config.surfaceDefaults
   return {
     id: (typeof s.id === 'string' && s.id) ? s.id : crypto.randomUUID(),
+    semanticName: typeof s.semanticName === 'string' ? s.semanticName : undefined,
+    aiContext: typeof s.aiContext === 'string' ? s.aiContext : undefined,
     type: s.type === 'Glass' || s.type === 'Air' ? s.type : n > 1.01 ? 'Glass' : 'Air',
     radius: Number(s.radius) || 0,
     thickness: Number(s.thickness) || d.thickness,
@@ -164,6 +167,7 @@ function App() {
   const runSampleAnalysisRef = useRef<(() => void) | null>(null)
   const pulseOptimizeRef = useRef<(() => void) | null>(null)
   const [sensitivityBySurface, setSensitivityBySurface] = useState<number[] | null>(null)
+  const [recentSemanticDeltas, setRecentSemanticDeltas] = useState<SemanticDelta[]>([])
   const [systemState, setSystemState] = useState<SystemState>(() => {
     const loaded = loadLastDesign()
     return loaded ?? { ...DEFAULT_SYSTEM_STATE, ...computePerformance(DEFAULT_SYSTEM_STATE) }
@@ -232,29 +236,33 @@ function App() {
             />
           )}
           {activeTab === 'coating' && <CoatingLab />}
-          {activeTab === 'agent' && (
-            <div className="flex flex-1 min-h-0 gap-4">
-              <div className="w-96 shrink-0 overflow-y-auto">
-                <AgentConsole
-                  systemState={systemState}
-                  onSystemStateChange={onSystemStateChange}
-                />
-              </div>
-              <div className="flex-1 min-w-0 min-h-[400px]">
-                <Canvas
-                  systemState={systemState}
-                  onSystemStateChange={onSystemStateChange}
-                  selectedSurfaceId={selectedSurfaceId}
-                  onSelectSurface={setSelectedSurfaceId}
-                  highlightedMetric={null}
-                  showBestFocus={showBestFocus}
-                  snapToFocus={snapToFocus}
-                  snapToSurface={snapToSurface}
-                  onMonteCarloSensitivity={setSensitivityBySurface}
-                />
-              </div>
+          {/* Agent panel — always mounted so Command Deck preserves state when switching tabs */}
+          <div
+            className="flex flex-1 min-h-0 gap-4"
+            style={{ display: activeTab === 'agent' ? 'flex' : 'none' }}
+          >
+            <div className="w-96 shrink-0 overflow-y-auto">
+              <AgentConsole
+                systemState={systemState}
+                onSystemStateChange={onSystemStateChange}
+                recentSemanticDeltas={recentSemanticDeltas}
+                onClearSemanticDeltas={() => setRecentSemanticDeltas([])}
+              />
             </div>
-          )}
+            <div className="flex-1 min-w-0 min-h-[400px]">
+              <Canvas
+                systemState={systemState}
+                onSystemStateChange={onSystemStateChange}
+                selectedSurfaceId={selectedSurfaceId}
+                onSelectSurface={setSelectedSurfaceId}
+                highlightedMetric={null}
+                showBestFocus={showBestFocus}
+                snapToFocus={snapToFocus}
+                snapToSurface={snapToSurface}
+                onMonteCarloSensitivity={setSensitivityBySurface}
+              />
+            </div>
+          </div>
           {activeTab === 'system' && (
             <SystemEditor
               systemState={systemState}
@@ -263,6 +271,9 @@ function App() {
               selectedSurfaceId={selectedSurfaceId}
               onSelectSurface={setSelectedSurfaceId}
               sensitivityBySurface={sensitivityBySurface}
+              onSemanticDelta={(d) =>
+                setRecentSemanticDeltas((prev) => [...prev.slice(-4), d])
+              }
             />
           )}
           {activeTab === 'info' && (

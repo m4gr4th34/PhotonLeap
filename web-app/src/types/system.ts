@@ -1,5 +1,9 @@
 export type Surface = {
   id: string
+  /** Semantic name for AI context (e.g. 'Primary_Objective', 'Field_Flattener') */
+  semanticName?: string
+  /** AI-Shadow DOM: hidden context describing the surface's purpose (e.g. 'Corrects coma from S1') */
+  aiContext?: string
   type: 'Glass' | 'Air'
   radius: number
   thickness: number
@@ -7,6 +11,10 @@ export type Surface = {
   diameter: number
   material: string
   description: string
+  /** Computed: surface power EFL = R/(n-1) for curved surfaces; null for plano */
+  effective_focal_length?: number | null
+  /** Computed: TIR critical angle (deg) for glass→air; null for air */
+  critical_angle?: number | null
   /** Tolerance ± (mm) for Radius — Monte Carlo jitter */
   radiusTolerance?: number
   /** Tolerance ± (mm) for Thickness — Monte Carlo jitter */
@@ -105,6 +113,18 @@ export type SystemState = {
   ghostSurfaces?: Surface[] | null
 }
 
+/** Dual-Purpose Semantic Lattice — optical stack with enriched surfaces for AI context.
+ * Each surface has semanticName, aiContext, effective_focal_length, critical_angle. */
+export type LatticeObject = {
+  surfaces: Surface[]
+  entrancePupilDiameter: number
+  wavelengths: number[]
+  fieldAngles: number[]
+  numRays: number
+  focusMode?: string
+  m2Factor?: number
+}
+
 /** Compute performance metrics from system state (prefer trace result when available) */
 export function computePerformance(state: SystemState): Pick<
   SystemState,
@@ -141,6 +161,8 @@ export const DEFAULT_SYSTEM_STATE: SystemState = {
   surfaces: [
     {
       id: crypto.randomUUID(),
+      semanticName: 'Primary_Objective_Front',
+      aiContext: '',
       type: 'Glass',
       radius: 100,
       thickness: 5,
@@ -152,6 +174,8 @@ export const DEFAULT_SYSTEM_STATE: SystemState = {
     },
     {
       id: crypto.randomUUID(),
+      semanticName: 'Primary_Objective_Back',
+      aiContext: '',
       type: 'Air',
       radius: -100,
       thickness: 95,
