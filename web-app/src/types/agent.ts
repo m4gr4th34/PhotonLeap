@@ -59,6 +59,12 @@ export type AgentModel =
   | 'deepseek-chat'
   | 'deepseek-reasoner'
 
+/** Image attachment for multimodal prompts — base64 data + media type */
+export type ImageAttachment = {
+  data: string
+  mediaType: string
+}
+
 /** Agent role for task assignment (Agent Grid) */
 export type AgentRole =
   | 'physicist'   // Snell's Law, quantum propagation math

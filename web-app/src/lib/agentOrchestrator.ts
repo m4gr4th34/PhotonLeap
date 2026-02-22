@@ -8,12 +8,56 @@
  */
 
 import type { Surface, SystemState, TraceResult, FocusMode } from '../types/system'
-import type { AgentTransaction, SurfaceDelta, AgentModel } from '../types/agent'
+import type { AgentTransaction, SurfaceDelta, AgentModel, ImageAttachment } from '../types/agent'
 import { config } from '../config'
 import { traceOpticalStack } from '../api/trace'
 import type { AgentSessionState, EpisodicMemory } from './agentSession'
 import { getStateDelta, updateSessionAfterRequest, updateEpisodic, resetEpisodicGoal, pruneSmallTalk, PHYSICS_CONSTRAINTS } from './agentSession'
 import { routeModel, ROUTING_ENABLED } from './agentRouter'
+
+/** Detect if an API error or model response indicates the model does not support images. */
+function isVisionUnsupportedError(msg: string): boolean {
+  const lower = msg.toLowerCase()
+  return (
+    /does not support (image|vision)/.test(lower) ||
+    /do not support (image|vision)/.test(lower) ||
+    /don't support (image|vision)/.test(lower) ||
+    /image message content type/.test(lower) ||
+    /model does not support image/.test(lower)
+  )
+}
+
+/** Extract a clean vision-unsupported message from API error (OpenAI/LM Studio JSON format). */
+function extractVisionErrorFromApi(msg: string): string {
+  try {
+    const jsonStart = msg.indexOf('{')
+    if (jsonStart >= 0) {
+      const parsed = JSON.parse(msg.slice(jsonStart)) as { error?: { message?: string } }
+      const inner = parsed?.error?.message
+      if (inner) return `The model does not support images. ${inner}`
+    }
+  } catch {
+    // fall through
+  }
+  return `The model does not support images. ${msg.slice(0, 200)}`
+}
+
+/** Detect if model response text (when parse fails) indicates it cannot process images. */
+function modelRefusesImages(text: string): string | null {
+  const patterns = [
+    /(?:i |i'm |i am )(?:cannot|can't|can not|do not|don't) (?:process|see|analyze|handle) (?:images?|pictures?|visual)/i,
+    /(?:i |i'm |i am )(?:only work|limited to) (?:text|written)/i,
+    /(?:as an? (?:ai|language model|llm),? )?(?:i )?(?:can only work|cannot process) (?:with )?text/i,
+    /(?:this )?model (?:does not|doesn't) support (?:images?|vision)/i,
+    /(?:there is )?no image/i,
+    /(?:i )?(?:cannot|can't) (?:process|analyze|see) (?:the )?(?:attached )?image/i,
+  ]
+  for (const p of patterns) {
+    const m = text.match(p)
+    if (m) return m[0].slice(0, 120)
+  }
+  return null
+}
 
 /** Check if we have an API key for the given model. Router must not override to a model we can't use. */
 function hasKeyForModel(model: string, apiKeys?: { openai?: string; anthropic?: string; deepseek?: string }): boolean {
@@ -313,6 +357,52 @@ function getLocalModelId(model: string): string {
   return model?.trim() || config.localAgent.modelId
 }
 
+/** Check if LM Studio model supports vision via /api/v1/models. Returns true/false, or null if check fails. */
+async function getLocalModelVisionSupport(modelId: string): Promise<boolean | null> {
+  try {
+    const base = config.localAgent.apiBase.replace(/\/v1\/?$/, '')
+    const res = await fetch(`${base}/api/v1/models`, {
+      headers: { Authorization: `Bearer ${config.localAgent.apiKey}` },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { models?: Array<{ key?: string; capabilities?: { vision?: boolean }; loaded_instances?: Array<{ id?: string }> }> }
+    const models = data.models ?? []
+    const id = modelId.toLowerCase()
+    for (const m of models) {
+      const keyMatch = m.key?.toLowerCase() === id
+      const loadedMatch = m.loaded_instances?.some((i) => i.id?.toLowerCase() === id)
+      if (keyMatch || loadedMatch) {
+        return m.capabilities?.vision === true
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Build user content for APIs that support multimodal (images + text). */
+function buildUserContent(userMessage: string, images?: ImageAttachment[]): string | unknown[] {
+  if (!images?.length) return userMessage
+  const textBlock = { type: 'text' as const, text: userMessage }
+  const imageBlocks = images.map((img) => ({
+    type: 'image' as const,
+    source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+  }))
+  return [...imageBlocks, textBlock]
+}
+
+/** Build user content for OpenAI/DeepSeek/LM Studio format (image_url). */
+function buildUserContentOpenAI(userMessage: string, images?: ImageAttachment[]): string | unknown[] {
+  if (!images?.length) return userMessage
+  const textBlock = { type: 'text' as const, text: userMessage }
+  const imageBlocks = images.map((img) => ({
+    type: 'image_url' as const,
+    image_url: { url: `data:${img.mediaType};base64,${img.data}` },
+  }))
+  return [...imageBlocks, textBlock]
+}
+
 /** ACE: Split system into cacheable prefix (~1000 tokens) + variable. Anthropic prompt caching. */
 function buildAnthropicSystemWithCache(systemMessage: string): unknown {
   const variablePart = systemMessage.slice(ACE_CACHEABLE_PREFIX.length)
@@ -330,14 +420,16 @@ async function callAnthropicStreaming(
   userMessage: string,
   onThinking: (chunk: string) => void,
   signal?: AbortSignal,
-  enableThinking?: boolean
+  enableThinking?: boolean,
+  images?: ImageAttachment[]
 ): Promise<string> {
+  const userContent = buildUserContent(userMessage, images)
   const body: Record<string, unknown> = {
     model,
     max_tokens: 2048,
     stream: true,
     system: buildAnthropicSystemWithCache(systemMessage),
-    messages: [{ role: 'user', content: userMessage }],
+    messages: [{ role: 'user', content: userContent }],
   }
   if (enableThinking) {
     body.thinking = { type: 'enabled', budget_tokens: 4000 }
@@ -411,15 +503,17 @@ async function callOpenAIStreaming(
   systemMessage: string,
   userMessage: string,
   onThinking: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  images?: ImageAttachment[]
 ): Promise<string> {
+  const userContent = buildUserContentOpenAI(userMessage, images)
   const body: Record<string, unknown> = {
     model,
     max_tokens: 2048,
     stream: true,
     messages: [
       { role: 'system', content: systemMessage },
-      { role: 'user', content: userMessage },
+      { role: 'user', content: userContent },
     ],
   }
   if (model.startsWith('o1')) body.reasoning_effort = 'medium'
@@ -493,9 +587,11 @@ async function callDeepSeekStreaming(
   userMessage: string,
   onThinking: (chunk: string) => void,
   signal?: AbortSignal,
-  attempt = 0
+  attempt = 0,
+  images?: ImageAttachment[]
 ): Promise<string> {
   const maxTokens = Math.min(16384 * (1 << Math.min(attempt, 2)), 65536)
+  const userContent = buildUserContentOpenAI(userMessage, images)
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
     signal,
@@ -509,7 +605,7 @@ async function callDeepSeekStreaming(
       stream: true,
       messages: [
         { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
+        { role: 'user', content: userContent },
       ],
     }),
   })
@@ -612,16 +708,90 @@ function parseThinkBlocks(
   return s
 }
 
-/** Stream LLM via LM Studio native API — emits reasoning in real time, returns full message text.
+/** Stream LLM via LM Studio — native API when text-only; OpenAI-compatible when images present.
  * Supports: (1) reasoning.delta events, (2) <think>...</think> in message.delta (grok-3-gemma3-12b, etc.) */
 async function callLLMStreaming(
   model: AgentModel | string,
   systemMessage: string,
   userMessage: string,
   onThinking: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  images?: ImageAttachment[]
 ): Promise<string> {
-  const { apiKey } = config.localAgent
+  const { apiBase, apiKey } = config.localAgent
+  const modelId = getLocalModelId(model)
+
+  // When images present: use OpenAI-compatible endpoint (native API is text-only)
+  if (images?.length) {
+    const userContent = buildUserContentOpenAI(userMessage, images)
+    const res = await fetch(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: modelId,
+        max_tokens: 2048,
+        stream: true,
+        messages: [
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`Local API error: ${res.status} ${err}`)
+    }
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('No response body')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullContent = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const raw = line.slice(6).trim()
+          if (!raw || raw === '[DONE]') continue
+          try {
+            const data = JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }> }
+            const delta = data.choices?.[0]?.delta
+            if (delta) {
+              if (typeof delta.reasoning_content === 'string') onThinking(delta.reasoning_content)
+              if (typeof delta.content === 'string') {
+                onThinking(delta.content)
+                fullContent += delta.content
+              }
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+    }
+    for (const line of buffer.split('\n')) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        try {
+          const delta = (JSON.parse(raw) as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta
+          if (delta?.content) fullContent += delta.content
+        } catch {
+          // skip
+        }
+      }
+    }
+    return fullContent
+  }
+
+  // Text-only: LM Studio native API for real-time reasoning
   const url = `${getLMStudioNativeBase()}/chat`
   const res = await fetch(url, {
     method: 'POST',
@@ -631,7 +801,7 @@ async function callLLMStreaming(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: getLocalModelId(model),
+      model: modelId,
       input: userMessage,
       system_prompt: systemMessage,
       stream: true,
@@ -715,11 +885,12 @@ async function callLLM(
   localMode?: boolean,
   onThinking?: (chunk: string) => void,
   signal?: AbortSignal,
-  attempt?: number
+  attempt?: number,
+  images?: ImageAttachment[]
 ): Promise<string> {
-  // Local Mode with streaming: LM Studio native API for real-time reasoning
+  // Local Mode with streaming: LM Studio native API (or OpenAI-compatible when images present)
   if (localMode && onThinking) {
-    return callLLMStreaming(model, systemMessage, userMessage, onThinking, signal)
+    return callLLMStreaming(model, systemMessage, userMessage, onThinking, signal, images)
   }
   // Local Mode (non-streaming): OpenAI-compatible API
   if (localMode) {
@@ -737,7 +908,7 @@ async function callLLM(
         max_tokens: 2048,
         messages: [
           { role: 'system', content: systemMessage },
-          { role: 'user', content: userMessage },
+          { role: 'user', content: buildUserContentOpenAI(userMessage, images) },
         ],
       }),
     })
@@ -757,8 +928,9 @@ async function callLLM(
     if (!anthropicApiKey) throw new Error('API key required for Anthropic. Add your key in Agent Uplink.')
     const supportsThinking = /claude-(opus-4|sonnet-4|haiku-4|3-7-sonnet)/.test(model)
     if (onThinking) {
-      return callAnthropicStreaming(anthropicApiKey, model, systemMessage, userMessage, onThinking, signal, supportsThinking)
+      return callAnthropicStreaming(anthropicApiKey, model, systemMessage, userMessage, onThinking, signal, supportsThinking, images)
     }
+    const userContent = buildUserContent(userMessage, images)
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -771,7 +943,7 @@ async function callLLM(
         model,
         max_tokens: 2048,
         system: buildAnthropicSystemWithCache(systemMessage),
-        messages: [{ role: 'user', content: userMessage }],
+        messages: [{ role: 'user', content: userContent }],
       }),
     })
     if (!res.ok) {
@@ -786,14 +958,15 @@ async function callLLM(
   if (model.startsWith('gpt') || model.startsWith('o1')) {
     if (!openaiApiKey) throw new Error('API key required for OpenAI. Add your key in Agent Uplink.')
     if (onThinking) {
-      return callOpenAIStreaming(openaiApiKey, model, systemMessage, userMessage, onThinking, signal)
+      return callOpenAIStreaming(openaiApiKey, model, systemMessage, userMessage, onThinking, signal, images)
     }
+    const userContent = buildUserContentOpenAI(userMessage, images)
     const body: Record<string, unknown> = {
       model,
       max_tokens: 2048,
       messages: [
         { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
+        { role: 'user', content: userContent },
       ],
     }
     if (model.startsWith('o1')) {
@@ -820,10 +993,11 @@ async function callLLM(
   if (model.startsWith('deepseek')) {
     if (!deepseekApiKey) throw new Error('API key required for DeepSeek. Add your key in Agent Uplink.')
     if (onThinking) {
-      return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal, attempt ?? 0)
+      return callDeepSeekStreaming(deepseekApiKey, model, systemMessage, userMessage, onThinking, signal, attempt ?? 0, images)
     }
     const attemptNum = attempt ?? 0
     const maxTokens = Math.min(16384 * (1 << Math.min(attemptNum, 2)), 65536)
+    const userContent = buildUserContentOpenAI(userMessage, images)
     const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       signal,
@@ -836,7 +1010,7 @@ async function callLLM(
         max_tokens: maxTokens,
         messages: [
           { role: 'system', content: systemMessage },
-          { role: 'user', content: userMessage },
+          { role: 'user', content: userContent },
         ],
       }),
     })
@@ -886,6 +1060,8 @@ export type AgentRunOptions = {
   onThinkingClear?: () => void
   /** AbortSignal to cancel the run (e.g. Stop button) */
   signal?: AbortSignal
+  /** Image attachments for multimodal prompts (drop/paste into Command box) */
+  images?: ImageAttachment[]
   /** Session for State-Diff (handshake once, delta thereafter). If omitted, uses full context every time. */
   session?: AgentSessionState
   /** Use hybrid model router (Brain-Body split). Default true. */
@@ -902,7 +1078,7 @@ export async function runAgent(
   userPrompt: string,
   options: AgentRunOptions
 ): Promise<AgentRunResult> {
-  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal, session, useRouter = true } = options
+  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal, images, session, useRouter = true } = options
   const rmsThresholdUm = config.agentRmsThresholdUm
 
   const pruned = pruneSmallTalk(userPrompt)
@@ -939,6 +1115,19 @@ export async function runAgent(
   let lastTransaction: AgentTransaction | null = null
   let lastError = ''
 
+  // Proactive check: LM Studio logs "Model does not support images" but may not return it in the API response.
+  // Query /api/v1/models for capabilities.vision to know for sure before sending.
+  if (images?.length && localMode) {
+    const modelId = getLocalModelId(routedModel)
+    const visionSupport = await getLocalModelVisionSupport(modelId)
+    if (visionSupport === false) {
+      return {
+        success: false,
+        error: `The selected model (${modelId}) does not support images. Load a vision model (e.g. Qwen2-VL) in LM Studio or switch to Cloud API (GPT-4o, Claude).`,
+      }
+    }
+  }
+
   /** Neuro-Symbolic: baseline RMS before agent changes (Verification Hook) */
   const baselineRmsUm =
     state.traceResult?.performance?.rmsSpotRadius != null
@@ -973,14 +1162,20 @@ export async function runAgent(
         ? `\n\nYour previous response was not valid JSON. Return ONLY a raw JSON object with "surfaceDeltas" (array) and optional "reasoning". No markdown, no \`\`\`json\`\`\` blocks, no text before or after. Example: {"surfaceDeltas":[{"id":"...","radius":50}],"reasoning":"..."}`
         : `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
       : ''
+    const imageSuffix = images?.length
+      ? `\n\n[CRITICAL: Image(s) are attached. Analyze them and propose optical changes. Your response MUST be ONLY a valid JSON object with "surfaceDeltas" (array) and optional "reasoning". No conversational text, no markdown, no explanation before or after the JSON.]`
+      : ''
     if (session && attempt > 0) updateEpisodic(session, { failedIterations: [isParseError ? 'Parse error (invalid JSON)' : lastError] })
 
     let text: string
     try {
-      text = await callLLM(routedModel, systemMessage, effectivePrompt + errorContext, apiKeys, localMode, onThinking, signal, attempt)
+      text = await callLLM(routedModel, systemMessage, effectivePrompt + imageSuffix + errorContext, apiKeys, localMode, onThinking, signal, attempt, images)
     } catch (err) {
       const aborted = err instanceof Error && err.name === 'AbortError'
-      const msg = err instanceof Error ? err.message : String(err)
+      let msg = err instanceof Error ? err.message : String(err)
+      if (!aborted && images?.length && isVisionUnsupportedError(msg)) {
+        msg = extractVisionErrorFromApi(msg)
+      }
       const localUnreachable = !aborted && localMode && isLocalUnreachableError(err)
       return {
         success: false,
@@ -994,7 +1189,12 @@ export async function runAgent(
     const parseOpts = localMode ? { model: routedModel, promptPreview: effectivePrompt, saveThoughts: true } : undefined
     const transaction = parseTransaction(text, surfaces, parseOpts)
     if (!transaction) {
-      lastError = 'Could not parse valid transaction from LLM response'
+      const modelRefusal = images?.length ? modelRefusesImages(text) : null
+      lastError = modelRefusal
+        ? `The model does not support images. It responded: "${modelRefusal}…" Try GPT-4o or Claude for image analysis.`
+        : images?.length
+          ? 'Could not parse valid transaction from LLM response. The model may not support images — try GPT-4o or Claude for image analysis.'
+          : 'Could not parse valid transaction from LLM response'
       continue
     }
 

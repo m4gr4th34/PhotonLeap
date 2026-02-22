@@ -4,9 +4,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square } from 'lucide-react'
+import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X } from 'lucide-react'
 import type { SystemState } from '../types/system'
-import type { AgentModel, AgentModelInfo } from '../types/agent'
+import type { AgentModel, AgentModelInfo, ImageAttachment } from '../types/agent'
 import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
 import { createAgentSession } from '../lib/agentSession'
 import { useAgents } from '../contexts/AgentKeysContext'
@@ -58,6 +58,8 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
   const [localOfflineWarning, setLocalOfflineWarning] = useState(false)
   const [commandHistory, setCommandHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
+  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
+  const [imageError, setImageError] = useState<string | null>(null)
   const draftRef = useRef('')
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
@@ -65,6 +67,33 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
   const sessionRef = useRef(createAgentSession())
 
   const MAX_COMMAND_HISTORY = 50
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
+const MAX_IMAGE_SIZE_MB = 5
+
+function fileToImageAttachment(file: File): Promise<ImageAttachment> {
+  return new Promise((resolve, reject) => {
+    if (!IMAGE_TYPES.includes(file.type)) {
+      reject(new Error(`Unsupported format: ${file.type}. Use PNG, JPEG, GIF, or WebP.`))
+      return
+    }
+    if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+      reject(new Error(`Image too large (max ${MAX_IMAGE_SIZE_MB} MB).`))
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+      if (!match) {
+        reject(new Error('Failed to read image.'))
+        return
+      }
+      resolve({ mediaType: match[1], data: match[2] })
+    }
+    reader.onerror = () => reject(new Error('Failed to read file.'))
+    reader.readAsDataURL(file)
+  })
+}
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
@@ -108,7 +137,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
 
   const handleSend = useCallback(async () => {
     const cmd = prompt.trim()
-    if (!cmd) return
+    if (!cmd && !imageAttachments.length) return
     if (!hasApiKey) {
       if (localMode) {
         setUplinkRequiredMessage('Local Mode: Add at least one model name in Agent Uplink (Manage keys) to proceed.')
@@ -130,11 +159,16 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
     setErrorMessage(null)
     setThinkingStream('')
     setLocalOfflineWarning(false)
+    setImageError(null)
+    const imagesToSend = [...imageAttachments]
+    setImageAttachments([])
     setPrompt('')
     draftRef.current = ''
     setHistoryIndex(-1)
+    const historyEntry = cmd || (imagesToSend.length ? `[${imagesToSend.length} image(s) attached]` : '')
     setCommandHistory((prev) => {
-      const next = [cmd, ...prev.filter((c) => c !== cmd)].slice(0, MAX_COMMAND_HISTORY)
+      if (!historyEntry) return prev
+      const next = [historyEntry, ...prev.filter((c) => c !== historyEntry)].slice(0, MAX_COMMAND_HISTORY)
       return next
     })
 
@@ -144,7 +178,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
     const userPrompt =
       recentSemanticDeltas.length > 0
         ? `[Recent edits: ${recentSemanticDeltas.map((d) => d.physicalImplication).join('; ')}]\n\n${cmd}`
-        : cmd
+        : cmd || '(Please analyze the attached image(s).)'
 
     const result = await runAgent(systemState, userPrompt, {
       model: effectiveModel as AgentModel,
@@ -160,6 +194,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
       signal: ac.signal,
       session: sessionRef.current,
       useRouter: !localMode,
+      images: imagesToSend.length ? imagesToSend : undefined,
     })
 
     abortControllerRef.current = null
@@ -202,7 +237,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
       if (result.localUnreachable) setLocalOfflineWarning(true)
       onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: null }))
     }
-  }, [prompt, model, localModel, effectiveModel, hasApiKey, systemState, onSystemStateChange, keys, localMode, recentSemanticDeltas, onClearSemanticDeltas])
+  }, [prompt, imageAttachments, model, localModel, effectiveModel, hasApiKey, systemState, onSystemStateChange, keys, localMode, recentSemanticDeltas, onClearSemanticDeltas])
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -383,9 +418,64 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
           </div>
         )}
 
-        {/* Command input — Up/Down for history */}
-        <div>
+        {/* Command input — Up/Down for history, drop/paste images */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setImageError(null)
+            const files = Array.from(e.dataTransfer.files).filter((f) => IMAGE_TYPES.includes(f.type))
+            if (files.length === 0 && e.dataTransfer.files.length > 0) {
+              setImageError('Only PNG, JPEG, GIF, or WebP images are supported.')
+              return
+            }
+            Promise.all(files.map((f) => fileToImageAttachment(f)))
+              .then((attachments) => {
+                setImageAttachments((prev) => [...prev, ...attachments].slice(0, 4))
+              })
+              .catch((err) => setImageError(err instanceof Error ? err.message : 'Failed to add images.'))
+          }}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData?.files ?? []).filter((f) => IMAGE_TYPES.includes(f.type))
+            if (files.length === 0) return
+            e.preventDefault()
+            setImageError(null)
+            Promise.all(files.map((f) => fileToImageAttachment(f)))
+              .then((attachments) => {
+                setImageAttachments((prev) => [...prev, ...attachments].slice(0, 4))
+              })
+              .catch((err) => setImageError(err instanceof Error ? err.message : 'Failed to add images.'))
+          }}
+        >
           <label className="block text-slate-400 text-xs font-medium mb-1.5">Command</label>
+          {imageAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {imageAttachments.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={`data:${img.mediaType};base64,${img.data}`}
+                    alt=""
+                    className="w-14 h-14 object-cover rounded-lg border border-white/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setImageAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full bg-slate-800 border border-white/20 text-slate-400 hover:bg-amber-500/20 hover:text-amber-400 hover:border-amber-500/40 transition-colors"
+                    aria-label="Remove image"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {imageError && (
+            <p className="text-amber-500/90 text-xs mb-1.5">{imageError}</p>
+          )}
           <textarea
             value={prompt}
             onChange={(e) => {
@@ -395,7 +485,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (prompt.trim()) handleSend()
+                if (prompt.trim() || imageAttachments.length) handleSend()
                 return
               }
               if (e.key === 'ArrowUp') {
@@ -415,12 +505,18 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
                 setPrompt(next >= 0 ? commandHistory[next] : draftRef.current)
               }
             }}
-            placeholder="e.g. Design a beam expander for 532nm laser, 50mm tube length"
+            placeholder="e.g. Design a beam expander for 532nm laser, 50mm tube length — or drop/paste images"
             rows={4}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 focus:shadow-[0_0_8px_rgba(34,211,238,0.25)] resize-none"
           />
           {commandHistory.length > 0 && (
             <p className="text-slate-600/80 text-[10px] mt-1">↑↓ browse history</p>
+          )}
+          {imageAttachments.length > 0 && (
+            <p className="text-slate-600/80 text-[10px] mt-1 flex items-center gap-1">
+              <ImagePlus className="w-3 h-3" />
+              Drop or paste images (max {MAX_IMAGE_SIZE_MB} MB each)
+            </p>
           )}
         </div>
 
@@ -459,7 +555,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
           <button
             type="button"
             onClick={handleSend}
-            disabled={!prompt.trim() || !!progress}
+            disabled={(!prompt.trim() && !imageAttachments.length) || !!progress}
             className="flex items-center gap-2 px-4 py-2 bg-cyan-electric/20 text-cyan-electric rounded-lg font-medium text-sm hover:bg-cyan-electric/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {progress ? (
@@ -506,8 +602,13 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
         )}
 
         {errorMessage && (
-          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-2">
             <p className="text-amber-500/90 text-sm font-mono">{errorMessage}</p>
+            {errorMessage === 'Could not parse valid transaction from LLM response' && localMode && (
+              <p className="text-slate-400 text-xs">
+                Many local models don&apos;t support vision. For image analysis, try a cloud model like GPT-4o or Claude.
+              </p>
+            )}
           </div>
         )}
       </div>
