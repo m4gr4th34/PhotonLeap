@@ -77,4 +77,12 @@ export const config = {
 
   /** Agent self-correction: RMS threshold (μm) above which design is considered failed */
   agentRmsThresholdUm: 1000,
+
+  /** Local Mode (LM Studio): base URL, dummy key, and model ID matching your loaded model */
+  localAgent: {
+    apiBase: 'http://localhost:1234/v1',
+    apiKey: 'lm-studio',
+    /** Model ID LM Studio expects (e.g. deepseek-r1-distill-qwen-32b-mlx). Override if you load a different model. */
+    modelId: 'deepseek-r1-distill-qwen-32b-mlx',
+  },
 } as const

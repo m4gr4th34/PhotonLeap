@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
-import { X, Link2, Eye, EyeOff, Trash2 } from 'lucide-react'
+import { X, Link2, Eye, EyeOff, Trash2, Cpu } from 'lucide-react'
 
 const PROVIDERS = [
   {
@@ -40,9 +40,12 @@ type UplinkModalProps = {
   onClearAllKeys?: () => void
   /** Shown when modal opened because key was required (e.g. "Neural Link Required: Please provide an API key for [Model] to proceed.") */
   requiredMessage?: string
+  /** Local Mode (LM Studio) — routes to localhost:1234/v1 */
+  localMode?: boolean
+  onLocalModeChange?: (on: boolean) => void
 }
 
-export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onClearAllKeys, requiredMessage }: UplinkModalProps) {
+export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onClearAllKeys, requiredMessage, localMode = false, onLocalModeChange }: UplinkModalProps) {
   const [keys, setKeys] = useState<Record<ProviderId, string>>({
     openai: initialKeys.openai ?? '',
     anthropic: initialKeys.anthropic ?? '',
@@ -138,6 +141,33 @@ export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onCle
               {requiredMessage}
             </p>
           )}
+
+          {/* Local Mode toggle */}
+          {onLocalModeChange && (
+            <div className="flex items-center justify-between mb-6 p-3 rounded-xl border border-white/10 bg-black/20">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-cyan-electric" />
+                <span className="text-sm font-medium text-slate-200">Local Mode</span>
+                <span className="text-xs text-slate-500">(LM Studio @ localhost:1234)</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={localMode}
+                onClick={() => onLocalModeChange(!localMode)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-electric/50 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                  localMode ? 'bg-cyan-electric' : 'bg-slate-600'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                    localMode ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
           <p className="text-slate-400 text-sm mb-6">
             Configure API keys for LeapOS agents. Keys are stored locally and never sent except to the respective provider.
           </p>

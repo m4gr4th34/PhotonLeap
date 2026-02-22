@@ -9,6 +9,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react'
 
 export const STORAGE_KEY = 'photonleap_agent_keys'
+export const LOCAL_MODE_STORAGE_KEY = 'photonleap_agent_local_mode'
 
 export type AgentKeys = {
   openai: string
@@ -43,20 +44,33 @@ export type HasKeys = {
   deepseek: boolean
 }
 
+function loadLocalMode(): boolean {
+  try {
+    const raw = localStorage.getItem(LOCAL_MODE_STORAGE_KEY)
+    return raw === 'true'
+  } catch {
+    return false
+  }
+}
+
 type AgentKeysContextValue = {
   keys: AgentKeys
   setKeys: (keys: AgentKeys) => void
   clearAllKeys: () => void
   getKey: (provider: keyof AgentKeys) => string
+  localMode: boolean
+  setLocalMode: (on: boolean) => void
 }
 
 const AgentKeysContext = createContext<AgentKeysContextValue | null>(null)
 
 export function AgentKeysProvider({ children }: { children: React.ReactNode }) {
   const [keys, setKeysState] = useState<AgentKeys>(loadStoredKeys)
+  const [localMode, setLocalModeState] = useState(loadLocalMode)
 
   useEffect(() => {
     setKeysState(loadStoredKeys())
+    setLocalModeState(loadLocalMode())
   }, [])
 
   const setKeys = useCallback((newKeys: AgentKeys) => {
@@ -82,9 +96,18 @@ export function AgentKeysProvider({ children }: { children: React.ReactNode }) {
     [keys]
   )
 
+  const setLocalMode = useCallback((on: boolean) => {
+    setLocalModeState(on)
+    try {
+      localStorage.setItem(LOCAL_MODE_STORAGE_KEY, String(on))
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const value = useMemo(
-    () => ({ keys, setKeys, clearAllKeys, getKey }),
-    [keys, setKeys, clearAllKeys, getKey]
+    () => ({ keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode }),
+    [keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode]
   )
 
   return (
@@ -112,6 +135,8 @@ export function useAgents() {
       setKeys: () => {},
       clearAllKeys: () => {},
       getKey: (_p: keyof AgentKeys) => '',
+      localMode: false,
+      setLocalMode: () => {},
     }
   }
   const hasKeys = useMemo(() => computeHasKeys(ctx.keys), [ctx.keys])
@@ -121,6 +146,8 @@ export function useAgents() {
     setKeys: ctx.setKeys,
     clearAllKeys: ctx.clearAllKeys,
     getKey: ctx.getKey,
+    localMode: ctx.localMode,
+    setLocalMode: ctx.setLocalMode,
   }
 }
 

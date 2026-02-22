@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound } from 'lucide-react'
+import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square } from 'lucide-react'
 import type { SystemState } from '../types/system'
 import type { AgentModel, AgentModelInfo } from '../types/agent'
 import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
@@ -37,7 +37,7 @@ type AgentConsoleProps = {
 }
 
 export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleProps) {
-  const { keys, setKeys, clearAllKeys } = useAgents()
+  const { keys, setKeys, clearAllKeys, localMode, setLocalMode } = useAgents()
   const [uplinkOpen, setUplinkOpen] = useState(false)
   const [uplinkRequiredMessage, setUplinkRequiredMessage] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
@@ -45,9 +45,14 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const [showContext, setShowContext] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<'success' | 'error' | null>(null)
+  const [lastReasoning, setLastReasoning] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [thinkingStream, setThinkingStream] = useState<string>('')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [localOfflineWarning, setLocalOfflineWarning] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
+  const thinkingContainerRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
@@ -58,6 +63,11 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     if (modelDropdownOpen) document.addEventListener('click', onOutside)
     return () => document.removeEventListener('click', onOutside)
   }, [modelDropdownOpen])
+
+  // Auto-scroll thinking stream as it populates
+  useEffect(() => {
+    thinkingContainerRef.current?.scrollTo({ top: thinkingContainerRef.current.scrollHeight, behavior: 'smooth' })
+  }, [thinkingStream])
 
   const optical_stack = {
     surfaces: systemState.surfaces,
@@ -71,7 +81,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const contextJson = buildSystemMessage(optical_stack, systemState.traceResult)
 
   const apiKey = getApiKeyForModel(model, keys)
-  const hasApiKey = Boolean(apiKey)
+  const hasApiKey = localMode || Boolean(apiKey)
 
   const handleSend = useCallback(async () => {
     if (!prompt.trim()) return
@@ -83,7 +93,13 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     }
     setProgress('Thinking...')
     setLastResult(null)
+    setLastReasoning(null)
     setErrorMessage(null)
+    setThinkingStream('')
+    setLocalOfflineWarning(false)
+
+    const ac = new AbortController()
+    abortControllerRef.current = ac
 
     const result = await runAgent(systemState, prompt.trim(), {
       model,
@@ -93,12 +109,18 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       onProposal: (surfaces) => {
         onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: surfaces }))
       },
+      localMode,
+      onThinking: localMode ? (chunk) => setThinkingStream((prev) => prev + chunk) : undefined,
+      onThinkingClear: localMode ? () => setThinkingStream('') : undefined,
+      signal: ac.signal,
     })
 
+    abortControllerRef.current = null
     setProgress(null)
 
     if (result.success) {
       setLastResult('success')
+      setLastReasoning(result.transaction.reasoning ?? null)
       const tr = result.traceResult
       onSystemStateChange((prev) => ({
         ...prev,
@@ -128,10 +150,15 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       }))
     } else {
       setLastResult('error')
-      setErrorMessage(result.error)
+      setErrorMessage(result.aborted ? 'Stopped by user' : result.error)
+      if (result.localUnreachable) setLocalOfflineWarning(true)
       onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: null }))
     }
-  }, [prompt, model, hasApiKey, systemState, onSystemStateChange, keys])
+  }, [prompt, model, hasApiKey, systemState, onSystemStateChange, keys, localMode])
+
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort()
+  }, [])
 
   return (
     <div className="h-full flex flex-col bg-slate-900/50 rounded-lg border border-white/10 overflow-hidden">
@@ -179,7 +206,12 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
               </div>
             )}
           </div>
-          {!hasApiKey && (
+          {localMode && (
+            <p className="text-cyan-electric/80 text-xs mt-1.5">
+              Local Mode — LM Studio @ localhost:1234
+            </p>
+          )}
+          {!hasApiKey && !localMode && (
             <p className="text-amber-500/90 text-xs mt-1.5 flex items-center gap-2">
               <button
                 type="button"
@@ -220,7 +252,30 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
           onSyncKeys={(k) => setKeys(k)}
           onClearAllKeys={clearAllKeys}
           requiredMessage={uplinkRequiredMessage ?? undefined}
+          localMode={localMode}
+          onLocalModeChange={setLocalMode}
         />
+
+        {/* Local Node Offline warning — offer to switch back to Cloud */}
+        {localOfflineWarning && localMode && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-col gap-2">
+            <p className="text-amber-400/90 text-sm font-medium">Local Node Offline</p>
+            <p className="text-slate-400 text-xs">
+              Unable to reach LM Studio at localhost:1234. If LM Studio is running, enable CORS in its Developer tab (Server Settings → Enable CORS). Otherwise switch back to Cloud API?
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setLocalMode(false)
+                setLocalOfflineWarning(false)
+                setErrorMessage(null)
+              }}
+              className="self-start px-3 py-1.5 text-sm font-medium text-cyan-electric hover:bg-cyan-electric/10 rounded-lg transition-colors"
+            >
+              Switch to Cloud API
+            </button>
+          </div>
+        )}
 
         {/* Command input */}
         <div>
@@ -228,6 +283,12 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (prompt.trim()) handleSend()
+              }
+            }}
             placeholder="e.g. Design a beam expander for 532nm laser, 50mm tube length"
             rows={4}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 focus:shadow-[0_0_8px_rgba(34,211,238,0.25)] resize-none"
@@ -251,7 +312,20 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
           )}
         </div>
 
-        {/* Send button */}
+        {/* Real-time thinking stream (LM Studio local mode) */}
+        {thinkingStream && (
+          <div className="p-3 rounded-lg bg-slate-800/80 border border-cyan-electric/20">
+            <p className="text-cyan-electric/90 text-xs font-medium mb-1.5">Thinking…</p>
+            <div
+              ref={thinkingContainerRef}
+              className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-40 overflow-y-auto"
+            >
+              {thinkingStream}
+            </div>
+          </div>
+        )}
+
+        {/* Send / Stop buttons */}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -271,6 +345,16 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
               </>
             )}
           </button>
+          {progress && (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500/20 text-amber-400 rounded-lg font-medium text-sm hover:bg-amber-500/30 transition-colors"
+            >
+              <Square className="w-4 h-4 fill-current" />
+              Stop
+            </button>
+          )}
           {lastResult === 'success' && (
             <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
               <CheckCircle className="w-4 h-4" />
@@ -284,6 +368,13 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
             </span>
           )}
         </div>
+
+        {lastResult === 'success' && lastReasoning && (
+          <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+            <p className="text-emerald-400/90 text-xs font-medium mb-1.5">Agent explanation</p>
+            <p className="text-slate-300 text-sm leading-relaxed">{lastReasoning}</p>
+          </div>
+        )}
 
         {errorMessage && (
           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
