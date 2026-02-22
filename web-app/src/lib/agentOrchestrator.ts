@@ -88,7 +88,7 @@ const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an
 
 ## Operational Protocol
 - Zero-Error Physics: Every design must respect the Law of Conservation of Energy and the Second Law of Thermodynamics. You cannot "create" light without a defined source.
-- Manufacturing Awareness: Favor "buildable" designs. Avoid center thicknesses <1mm or curvatures that create "knife-edges" on lens peripheries. |radius| must be >= diameter to avoid impossible curves.
+- Manufacturing Awareness: Favor "buildable" designs. Avoid center thicknesses <1mm or curvatures that create "knife-edges" on lens peripheries.
 
 ## Optical Stack Schema (Dual-Purpose Semantic Lattice)
 Each surface has:
@@ -120,7 +120,6 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 
 ## Constraints
 - thickness > 0, diameter > 0
-- |radius| >= diameter to avoid knife-edges (impossible curves)
 - If design fails physical validation, you will receive error context; propose a new transaction.`
 
 /** Optical Physics Constants — static, cacheable (~200 tokens). Never changes. */
@@ -325,9 +324,6 @@ export function validateTransaction(surfaces: Surface[], transaction: AgentTrans
     if (s.diameter <= 0) {
       return { valid: false, error: `Surface ${s.id} has invalid diameter` }
     }
-    if (s.radius !== 0 && Math.abs(s.radius) < s.diameter) {
-      return { valid: false, error: `Surface ${s.id} impossible curve: |radius| ${Math.abs(s.radius)}mm < diameter ${s.diameter}mm — would create knife-edge` }
-    }
   }
   return { valid: true }
 }
@@ -344,7 +340,7 @@ type TraceForAudit = {
 export function validatePhysicalState(surfaces: Surface[], traceResult: TraceForAudit): ValidationReport {
   const violations: Array<{ category: string; message: string }> = []
 
-  // Geometry: hyper-sphere (thickness > radius*2), knife-edge already in validateTransaction
+  // Geometry: hyper-sphere (thickness > radius*2)
   for (const s of surfaces) {
     if (s.type === 'Glass' && s.radius !== 0 && s.thickness > Math.abs(s.radius) * 2) {
       violations.push({
