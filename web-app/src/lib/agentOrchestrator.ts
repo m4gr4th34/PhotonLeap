@@ -14,6 +14,16 @@ import { traceOpticalStack } from '../api/trace'
 import type { AgentSessionState, EpisodicMemory } from './agentSession'
 import { getStateDelta, updateSessionAfterRequest, updateEpisodic, resetEpisodicGoal, pruneSmallTalk } from './agentSession'
 import { routeModel, ROUTING_ENABLED } from './agentRouter'
+
+/** Check if we have an API key for the given model. Router must not override to a model we can't use. */
+function hasKeyForModel(model: string, apiKeys?: { openai?: string; anthropic?: string; deepseek?: string }): boolean {
+  if (!apiKeys) return false
+  if (model.startsWith('claude')) return Boolean(apiKeys.anthropic?.trim())
+  if (model.startsWith('gpt') || model.startsWith('o1')) return Boolean(apiKeys.openai?.trim())
+  if (model.startsWith('deepseek')) return Boolean(apiKeys.deepseek?.trim())
+  return false
+}
+
 import { parseJsonPatch, patchToSurfaceDeltasById } from './jsonPatch'
 import { appendThoughtTrace } from './thoughtTrace'
 
@@ -559,7 +569,10 @@ export async function runAgent(
   }
   const effectivePrompt = pruned
 
-  const routedModel = ROUTING_ENABLED && useRouter ? routeModel(effectivePrompt, model as AgentModel) : model
+  let routedModel = ROUTING_ENABLED && useRouter ? routeModel(effectivePrompt, model as AgentModel) : model
+  if (routedModel !== model && !localMode && apiKeys && !hasKeyForModel(routedModel, apiKeys)) {
+    routedModel = model
+  }
   if (session) resetEpisodicGoal(session, effectivePrompt.slice(0, 120))
 
   const optical_stack = {
