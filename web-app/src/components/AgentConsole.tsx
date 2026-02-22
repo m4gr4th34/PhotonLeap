@@ -4,10 +4,10 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X } from 'lucide-react'
+import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRound, Square, ImagePlus, X, Shield, ShieldAlert } from 'lucide-react'
 import type { SystemState } from '../types/system'
 import type { AgentModel, AgentModelInfo, ImageAttachment } from '../types/agent'
-import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
+import { runAgent, buildSystemMessage, type ValidationReport } from '../lib/agentOrchestrator'
 import { createAgentSession } from '../lib/agentSession'
 import { useAgents } from '../contexts/AgentKeysContext'
 import { UplinkModal } from './UplinkModal'
@@ -60,6 +60,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
   const [imageError, setImageError] = useState<string | null>(null)
+  const [physicsViolations, setPhysicsViolations] = useState<ValidationReport | null>(null)
   const draftRef = useRef('')
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
@@ -160,6 +161,7 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
     setThinkingStream('')
     setLocalOfflineWarning(false)
     setImageError(null)
+    setPhysicsViolations(null)
     const imagesToSend = [...imageAttachments]
     setImageAttachments([])
     setPrompt('')
@@ -195,10 +197,12 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
       session: sessionRef.current,
       useRouter: !localMode,
       images: imagesToSend.length ? imagesToSend : undefined,
+      onPhysicsViolation: setPhysicsViolations,
     })
 
     abortControllerRef.current = null
     setProgress(null)
+    setPhysicsViolations(null)
 
     if (result.success) {
       onClearSemanticDeltas?.()
@@ -536,6 +540,29 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
             </pre>
           )}
         </div>
+
+        {/* Physics Integrity status — red when agent struggling with physical violations */}
+        {progress && (
+          <div
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium ${
+              physicsViolations
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400/90'
+            }`}
+          >
+            {physicsViolations ? (
+              <>
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>Physics Integrity: {physicsViolations.violations.length} constraint(s) violated — retrying</span>
+              </>
+            ) : (
+              <>
+                <Shield className="w-3.5 h-3.5 shrink-0" />
+                <span>Physics Integrity: OK</span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Real-time thinking stream (LM Studio local mode) — subtle, secondary */}
         {thinkingStream && (

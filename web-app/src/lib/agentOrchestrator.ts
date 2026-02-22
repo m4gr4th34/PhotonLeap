@@ -8,6 +8,12 @@
  */
 
 import type { Surface, SystemState, TraceResult, FocusMode } from '../types/system'
+
+/** Multi-Physics Auditor: validation result with violation list. */
+export type ValidationReport = {
+  isValid: boolean
+  violations: Array<{ category: string; message: string }>
+}
 import type { AgentTransaction, SurfaceDelta, AgentModel, ImageAttachment } from '../types/agent'
 import { config } from '../config'
 import { traceOpticalStack } from '../api/trace'
@@ -82,7 +88,6 @@ const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an
 
 ## Operational Protocol
 - Zero-Error Physics: Every design must respect the Law of Conservation of Energy and the Second Law of Thermodynamics. You cannot "create" light without a defined source.
-- Metric-Driven Design: When asked to optimize, minimize the Root Mean Square (RMS) spot size or maximize the Strehl Ratio.
 - Manufacturing Awareness: Favor "buildable" designs. Avoid center thicknesses <1mm or curvatures that create "knife-edges" on lens peripheries. |radius| must be >= diameter to avoid impossible curves.
 
 ## Optical Stack Schema (Dual-Purpose Semantic Lattice)
@@ -117,22 +122,21 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 - radius must be non-zero for Glass surfaces
 - thickness > 0, diameter > 0
 - |radius| >= diameter to avoid knife-edges (impossible curves)
-- If design fails (RMS too high), you will receive error context; propose a new transaction.`
+- If design fails physical validation, you will receive error context; propose a new transaction.`
 
 /** Optical Physics Constants — static, cacheable (~200 tokens). Never changes. */
 const OPTICAL_PHYSICS_CONSTANTS = `
 ## Physics Constants (immutable)
 - Snell: n₁sin(θ₁)=n₂sin(θ₂). TIR when θ ≥ arcsin(n₂/n₁).
 - Lensmaker (thin): 1/f = (n-1)(1/R₁ - 1/R₂).
-- RMS threshold: ${config.agentRmsThresholdUm} μm. |radius| ≥ diameter. thickness > 0.
 - Glass library: N-BK7, N-SF11, Fused Silica, N-SF5, N-SF6, N-SF10, N-SF14, N-F2, N-SK2, N-BAF10, N-LAK9, H-LAF7, Calcium Fluoride, Magnesium Fluoride, Sapphire, N-K5, N-SK16, N-BAF4, N-SF6HT, N-LAK14, N-BK10, N-SF57, N-SF66, N-SF15.
 `
 
 /** ACE: Cacheable prefix — System Identity + Constants. First ~1000 tokens, never changes. */
 const ACE_CACHEABLE_PREFIX = PHYSICIST_SYSTEM_PROMPT + OPTICAL_PHYSICS_CONSTANTS
 
-/** Physics Validator: intercepts AI-generated designs. If agent proposes lens violating Conservation of Energy
- * (e.g. gain without pump), or RMS exceeds threshold, feeds error back to agent for second pass. */
+/** Physics Validator: intercepts AI-generated designs. If agent proposes lens violating physical invariants,
+ * feeds error back to agent for second pass. */
 
 /** Build system message with current optical context (State Snapshot) */
 export function buildSystemMessage(
@@ -330,6 +334,89 @@ export function validateTransaction(surfaces: Surface[], transaction: AgentTrans
     }
   }
   return { valid: true }
+}
+
+/** Trace-like input for Multi-Physics Auditor (performance, rayPower, terminationLog) */
+type TraceForAudit = {
+  performance?: { rmsSpotRadius: number; totalLength: number }
+  rayPower?: number[]
+  terminationLog?: Array<{ reason?: string; surf?: number }>
+} | null
+
+/** Multi-Physics Auditor: validate optical_stack + trace against physical invariants.
+ * Returns ValidationReport with violations. Used after trace to catch impossible designs. */
+export function validatePhysicalState(surfaces: Surface[], traceResult: TraceForAudit): ValidationReport {
+  const violations: Array<{ category: string; message: string }> = []
+
+  // Geometry: hyper-sphere (thickness > radius*2), knife-edge already in validateTransaction
+  for (const s of surfaces) {
+    if (s.type === 'Glass' && s.radius !== 0 && s.thickness > Math.abs(s.radius) * 2) {
+      violations.push({
+        category: 'Geometry',
+        message: `Surface ${s.id}: thickness ${s.thickness}mm > |radius|×2 (${Math.abs(s.radius) * 2}mm) — hyper-sphere cannot be built`,
+      })
+    }
+  }
+
+  // Material: impossible glass (n < 1)
+  for (const s of surfaces) {
+    if (s.type === 'Glass' && s.refractiveIndex < 1.0) {
+      violations.push({
+        category: 'Material',
+        message: `Surface ${s.id}: refractiveIndex ${s.refractiveIndex} < 1.0 — impossible glass`,
+      })
+    }
+  }
+
+  // Energy: ray power > 1 (conservation violation)
+  const rayPower = traceResult?.rayPower
+  if (rayPower?.length) {
+    const overUnity = rayPower.filter((p) => p > 1.0).length
+    if (overUnity > 0) {
+      violations.push({
+        category: 'Energy',
+        message: `${overUnity} ray(s) have transmitted power > 1.0 — energy conservation violated`,
+      })
+    }
+  }
+
+  // Operational: total path length exceeds bench
+  const totalLength = traceResult?.performance?.totalLength ?? surfaces.reduce((sum, s) => sum + s.thickness, 0)
+  if (totalLength > config.agentMaxBenchSizeMm) {
+    violations.push({
+      category: 'Operational',
+      message: `Total path length ${totalLength.toFixed(1)}mm exceeds max bench size ${config.agentMaxBenchSizeMm}mm`,
+    })
+  }
+
+  // Aspect ratio: diameter/thickness > 20 (too fragile)
+  for (let i = 0; i < surfaces.length; i++) {
+    const s = surfaces[i]
+    if (s.type === 'Glass' && s.thickness > 0 && s.diameter / s.thickness > config.agentMaxAspectRatio) {
+      violations.push({
+        category: 'Geometry',
+        message: `Surface ${s.id}: aspect ratio diameter/thickness = ${(s.diameter / s.thickness).toFixed(1)} > ${config.agentMaxAspectRatio} — too fragile to manufacture`,
+      })
+    }
+  }
+
+  // TIR: ray escaped at unintended surface (from termination log)
+  const termLog = traceResult?.terminationLog
+  if (termLog?.length) {
+    const tirTerms = termLog.filter((t) => /tir|total.?internal.?reflection/i.test(t.reason ?? ''))
+    if (tirTerms.length > 0) {
+      const surfIds = [...new Set(tirTerms.map((t) => t.surf).filter((x): x is number => x != null))]
+      violations.push({
+        category: 'Energy',
+        message: `Total Internal Reflection at surface(s) ${surfIds.join(', ')} — ray may not exit as intended`,
+      })
+    }
+  }
+
+  return {
+    isValid: violations.length === 0,
+    violations,
+  }
 }
 
 /** Detect if error indicates local server unreachable (network/connection failure) */
@@ -1066,20 +1153,21 @@ export type AgentRunOptions = {
   session?: AgentSessionState
   /** Use hybrid model router (Brain-Body split). Default true. */
   useRouter?: boolean
+  /** Called when Multi-Physics Auditor rejects design — for Physics Integrity UI */
+  onPhysicsViolation?: (report: ValidationReport) => void
 }
 
 export type AgentRunResult =
   | { success: true; surfaces: Surface[]; transaction: AgentTransaction; traceResult: Awaited<ReturnType<typeof traceStack>> }
   | { success: false; error: string; lastTransaction?: AgentTransaction; localUnreachable?: boolean; aborted?: boolean }
 
-/** Run the agent loop: prompt → LLM → parse → apply → validate → trace. Self-correct if RMS too high. */
+/** Run the agent loop: prompt → LLM → parse → apply → validate → trace. Multi-Physics Auditor rejects physical invariant violations. */
 export async function runAgent(
   state: SystemState,
   userPrompt: string,
   options: AgentRunOptions
 ): Promise<AgentRunResult> {
-  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal, images, session, useRouter = true } = options
-  const rmsThresholdUm = config.agentRmsThresholdUm
+  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal, images, session, useRouter = true, onPhysicsViolation } = options
 
   const pruned = pruneSmallTalk(userPrompt)
   if (pruned === null) {
@@ -1128,12 +1216,6 @@ export async function runAgent(
     }
   }
 
-  /** Neuro-Symbolic: baseline RMS before agent changes (Verification Hook) */
-  const baselineRmsUm =
-    state.traceResult?.performance?.rmsSpotRadius != null
-      ? state.traceResult.performance.rmsSpotRadius * 1000
-      : null
-
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     onThinkingClear?.()
     onProgress?.(attempt === 0 ? 'Thinking...' : `Retrying (${attempt + 1}/${maxRetries})...`)
@@ -1157,10 +1239,13 @@ export async function runAgent(
     }
 
     const isParseError = lastError === 'Could not parse valid transaction from LLM response'
+    const isPhysicalViolation = lastError.startsWith('Design rejected: Physical Invariant Violation')
     const errorContext = attempt > 0 && lastError
       ? isParseError
         ? `\n\nYour previous response was not valid JSON. Return ONLY a raw JSON object with "surfaceDeltas" (array) and optional "reasoning". No markdown, no \`\`\`json\`\`\` blocks, no text before or after. Example: {"surfaceDeltas":[{"id":"...","radius":50}],"reasoning":"..."}`
-        : `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
+        : isPhysicalViolation
+          ? `\n\nYour proposed design violates physical or manufacturing constraints. See the report below. You must adjust the parameters to satisfy these constraints before I can render the system.\n\n${lastError}`
+          : `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
       : ''
     const imageSuffix = images?.length
       ? `\n\n[CRITICAL: Image(s) are attached. Analyze them and propose optical changes. Your response MUST be ONLY a valid JSON object with "surfaceDeltas" (array) and optional "reasoning". No conversational text, no markdown, no explanation before or after the JSON.]`
@@ -1237,26 +1322,22 @@ export async function runAgent(
       continue
     }
 
-    const rmsUm = traceResult?.performance?.rmsSpotRadius != null
-      ? traceResult.performance.rmsSpotRadius * 1000
-      : 0
+    /** Multi-Physics Auditor: validate physical invariants (geometry, material, energy, operational) */
+    const audit = validatePhysicalState(surfaces, traceResult)
 
-    /** Verification Hook: reject if RMS increased (design degraded) */
-    if (baselineRmsUm != null && rmsUm > baselineRmsUm) {
-      lastError = `Design rejected: RMS increased from ${baselineRmsUm.toFixed(1)} to ${rmsUm.toFixed(1)} μm. Please refine.`
-      if (session) updateEpisodic(session, { failedIterations: [lastError] })
+    if (!audit.isValid) {
+      const violationList = audit.violations.map((v) => `[${v.category}] ${v.message}`).join('; ')
+      lastError = `Design rejected: Physical Invariant Violation. ${violationList} Please resolve these constraints before proceeding.`
+      onPhysicsViolation?.(audit)
+      if (session) updateEpisodic(session, { failedIterations: audit.violations.map((v) => v.message) })
       continue
     }
 
-    if (rmsUm <= rmsThresholdUm) {
-      if (session) {
-        updateSessionAfterRequest(session, surfaces, traceResult)
-        updateEpisodic(session, { constraintsMet: [`RMS ${rmsUm.toFixed(1)} μm within threshold`] })
-      }
-      return { success: true, surfaces, transaction, traceResult }
+    if (session) {
+      updateSessionAfterRequest(session, surfaces, traceResult)
+      updateEpisodic(session, { constraintsMet: ['All physical constraints satisfied'] })
     }
-
-    lastError = `Design failed: RMS spot radius ${rmsUm.toFixed(1)} μm exceeds threshold ${rmsThresholdUm} μm. Try aspheric on Surface 2, different glass, or adjust curvature.`
+    return { success: true, surfaces, transaction, traceResult }
   }
 
   return {

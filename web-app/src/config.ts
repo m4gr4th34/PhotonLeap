@@ -78,6 +78,12 @@ export const config = {
   /** Agent self-correction: RMS threshold (μm) above which design is considered failed */
   agentRmsThresholdUm: 1000,
 
+  /** Max optical bench length (mm) — designs exceeding this fail Operational check */
+  agentMaxBenchSizeMm: 500,
+
+  /** Max lens aspect ratio (diameter/thickness) — > this is too fragile to manufacture */
+  agentMaxAspectRatio: 20,
+
   /** Local Mode (LM Studio): base URL, dummy key, and model ID matching your loaded model */
   localAgent: {
     apiBase: 'http://localhost:1234/v1',
