@@ -10,6 +10,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useMemo } 
 
 export const STORAGE_KEY = 'photonleap_agent_keys'
 export const LOCAL_MODE_STORAGE_KEY = 'photonleap_agent_local_mode'
+export const LOCAL_MODELS_STORAGE_KEY = 'photonleap_agent_local_models'
 
 export type AgentKeys = {
   openai: string
@@ -53,6 +54,17 @@ function loadLocalMode(): boolean {
   }
 }
 
+function loadLocalModels(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_MODELS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((m): m is string => typeof m === 'string' && m.trim().length > 0) : []
+  } catch {
+    return []
+  }
+}
+
 type AgentKeysContextValue = {
   keys: AgentKeys
   setKeys: (keys: AgentKeys) => void
@@ -60,6 +72,8 @@ type AgentKeysContextValue = {
   getKey: (provider: keyof AgentKeys) => string
   localMode: boolean
   setLocalMode: (on: boolean) => void
+  localModels: string[]
+  setLocalModels: (models: string[]) => void
 }
 
 const AgentKeysContext = createContext<AgentKeysContextValue | null>(null)
@@ -67,10 +81,12 @@ const AgentKeysContext = createContext<AgentKeysContextValue | null>(null)
 export function AgentKeysProvider({ children }: { children: React.ReactNode }) {
   const [keys, setKeysState] = useState<AgentKeys>(loadStoredKeys)
   const [localMode, setLocalModeState] = useState(loadLocalMode)
+  const [localModels, setLocalModelsState] = useState<string[]>(loadLocalModels)
 
   useEffect(() => {
     setKeysState(loadStoredKeys())
     setLocalModeState(loadLocalMode())
+    setLocalModelsState(loadLocalModels())
   }, [])
 
   const setKeys = useCallback((newKeys: AgentKeys) => {
@@ -105,9 +121,19 @@ export function AgentKeysProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const setLocalModels = useCallback((models: string[]) => {
+    const trimmed = models.map((m) => m.trim()).filter(Boolean)
+    setLocalModelsState(trimmed)
+    try {
+      localStorage.setItem(LOCAL_MODELS_STORAGE_KEY, JSON.stringify(trimmed))
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const value = useMemo(
-    () => ({ keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode }),
-    [keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode]
+    () => ({ keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode, localModels, setLocalModels }),
+    [keys, setKeys, clearAllKeys, getKey, localMode, setLocalMode, localModels, setLocalModels]
   )
 
   return (
@@ -137,6 +163,8 @@ export function useAgents() {
       getKey: (_p: keyof AgentKeys) => '',
       localMode: false,
       setLocalMode: () => {},
+      localModels: [] as string[],
+      setLocalModels: () => {},
     }
   }
   const hasKeys = useMemo(() => computeHasKeys(ctx.keys), [ctx.keys])
@@ -148,6 +176,8 @@ export function useAgents() {
     getKey: ctx.getKey,
     localMode: ctx.localMode,
     setLocalMode: ctx.setLocalMode,
+    localModels: ctx.localModels,
+    setLocalModels: ctx.setLocalModels,
   }
 }
 

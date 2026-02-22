@@ -11,6 +11,11 @@ import type { Surface, SystemState, TraceResult, FocusMode } from '../types/syst
 import type { AgentTransaction, SurfaceDelta, AgentModel } from '../types/agent'
 import { config } from '../config'
 import { traceOpticalStack } from '../api/trace'
+import type { AgentSessionState, EpisodicMemory } from './agentSession'
+import { getStateDelta, updateSessionAfterRequest, updateEpisodic, resetEpisodicGoal, pruneSmallTalk } from './agentSession'
+import { routeModel, ROUTING_ENABLED } from './agentRouter'
+import { parseJsonPatch, patchToSurfaceDeltasById } from './jsonPatch'
+import { appendThoughtTrace } from './thoughtTrace'
 
 /** PhotonLeap Physicist System Identity — transforms general-purpose LLM into Optical & Quantum Architect */
 const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an expert in classical ray optics, wave propagation, and quantum information science. Your goal is to design, optimize, and troubleshoot physical systems within the PhotonLeap environment.
@@ -42,7 +47,9 @@ N-BK7, N-SF11, N-SF5, N-SF6, N-SF10, N-SF14, N-F2, N-SK2, Fused Silica, N-BAF10,
 ## Output Format
 Your response must be a valid JSON object. Do not include any text outside of the JSON structure.
 Return ONLY valid JSON. No conversational filler unless requested.
-{"surfaceDeltas":[{"id":"surf-uuid","radius":50,"thickness":5,"material":"N-BK7",...}],"reasoning":"brief physics explanation"}
+
+Preferred (token-efficient): JSON Patch RFC 6902 — e.g. [{"op":"replace","path":"/surfaces/<id>/thickness","value":8}]
+Full format: {"surfaceDeltas":[{"id":"surf-uuid","radius":50,"thickness":5,"material":"N-BK7",...}],"reasoning":"brief physics explanation"}
 
 Optional: If design is physically impossible (e.g. TIR preventing beam exit), include:
 {"physicsViolation":true,"reason":"description","suggestedAlternative":"geometry hint","surfaceDeltas":[],"reasoning":"..."}
@@ -91,22 +98,49 @@ export function buildSystemMessage(
   return `${PHYSICIST_SYSTEM_PROMPT}\n\n## Current System State (JSON)\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``
 }
 
+/** Build system message from state delta (token-efficient: handshake once, then delta-only). */
+export function buildSystemMessageFromDelta(
+  delta: object,
+  isHandshake: boolean,
+  episodic: EpisodicMemory
+): string {
+  const episodicBlock =
+    episodic.currentGoal || episodic.constraintsMet.length || episodic.failedIterations.length
+      ? `\n## Episodic Memory\n- Current Goal: ${episodic.currentGoal || 'None'}\n- Constraints Met: ${episodic.constraintsMet.join('; ') || 'None'}\n- Failed Iterations: ${episodic.failedIterations.join('; ') || 'None'}`
+      : ''
+  const label = isHandshake ? 'Full Handshake (JSON)' : 'State Delta (compact)'
+  return `${PHYSICIST_SYSTEM_PROMPT}${episodicBlock}\n\n## ${label}\n\`\`\`json\n${JSON.stringify(delta)}\n\`\`\``
+}
+
 /** Strip <think>...</think> blocks (DeepSeek R1, LM Studio reasoning models) — keep only content after for parsing.
- * Handles: <think></think>, <<think>>...<<</think>>>, and unclosed blocks. */
-function stripThinkBlocks(text: string): string {
+ * Handles: <think></think>, <<think>>...<<</think>>>, and unclosed blocks.
+ * Raw thoughts are saved to thought_trace for debugging (not re-sent to context). */
+function stripThinkBlocks(text: string, options?: { model?: string; promptPreview?: string; saveThoughts?: boolean }): string {
   const thinkOpen = '(?:<think>|<<think>>)'
   const thinkClose = '(?:</think>|<<\\/think>>)'
+  const openRegex = new RegExp(thinkOpen, 'gi')
+
+  if (options?.saveThoughts && options.model && options.promptPreview) {
+    const matches = text.matchAll(new RegExp(thinkOpen + '([\\s\\S]*?)' + thinkClose, 'gi'))
+    for (const m of matches) {
+      if (m[1]) appendThoughtTrace(options.model, options.promptPreview, m[1])
+    }
+    const unclosed = text.match(new RegExp(thinkOpen + '[\\s\\S]*$', 'i'))
+    if (unclosed) {
+      const content = unclosed[0].replace(openRegex, '').trim()
+      if (content) appendThoughtTrace(options.model, options.promptPreview, content)
+    }
+  }
+
   let result = text
-  // 1. Remove complete think blocks (standard + DeepSeek R1 double-bracket variants)
   result = result.replace(new RegExp(thinkOpen + '[\\s\\S]*?' + thinkClose, 'gi'), '')
-  // 2. Remove unclosed think blocks (strip from opening tag to end of string)
   result = result.replace(new RegExp(thinkOpen + '[\\s\\S]*$', 'gi'), '')
   return result.trim()
 }
 
 /** Extract JSON string from content — tries raw JSON, then markdown ```json ... ``` blocks. */
-function extractJsonString(text: string): string | null {
-  const stripped = stripThinkBlocks(text)
+function extractJsonString(text: string, thinkOptions?: Parameters<typeof stripThinkBlocks>[1]): string | null {
+  const stripped = stripThinkBlocks(text, thinkOptions)
   const trimmed = stripped.trim()
   // 1. Try markdown code block first: ```json ... ``` or ``` ... ```
   const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -122,18 +156,22 @@ function extractJsonString(text: string): string | null {
   return null
 }
 
-/** Parse LLM response for AgentTransaction. Robust extraction from markdown and raw JSON. */
-export function parseTransaction(text: string): AgentTransaction | null {
-  const stripped = stripThinkBlocks(text)
+type ParseTransactionOptions = { model?: string; promptPreview?: string; saveThoughts?: boolean }
+
+/** Parse LLM response for AgentTransaction. Supports surfaceDeltas and JSON Patch (RFC 6902). */
+export function parseTransaction(text: string, surfaces: Surface[], options?: ParseTransactionOptions): AgentTransaction | null {
+  const thinkOpts = options?.saveThoughts && options.model && options.promptPreview
+    ? { model: options.model, promptPreview: options.promptPreview, saveThoughts: true }
+    : undefined
+  const stripped = stripThinkBlocks(text, thinkOpts)
   const strategies = [
-    () => extractJsonString(text),
-    () => extractJsonString(stripped),
+    () => extractJsonString(text, thinkOpts),
+    () => extractJsonString(stripped, thinkOpts),
     () => {
-      // If first attempt failed, try each code block separately
       const blocks = stripped.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)
       for (const m of blocks) {
         const inner = m[1]?.trim()
-        if (inner?.startsWith('{')) return inner
+        if (inner?.startsWith('{') || inner?.startsWith('[')) return inner
       }
       return null
     },
@@ -144,6 +182,15 @@ export function parseTransaction(text: string): AgentTransaction | null {
     if (!jsonStr) continue
     try {
       const parsed = JSON.parse(jsonStr) as unknown
+      if (Array.isArray(parsed)) {
+        const patch = parseJsonPatch(jsonStr)
+        if (patch && patch.length > 0) {
+          const surfaceDeltas = patchToSurfaceDeltasById(patch, surfaces)
+          if (surfaceDeltas.length > 0) {
+            return { surfaceDeltas, reasoning: 'Applied via JSON Patch' }
+          }
+        }
+      }
       if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { surfaceDeltas?: unknown }).surfaceDeltas)) {
         const t = parsed as { surfaceDeltas: unknown[]; reasoning?: string; physicsViolation?: boolean; reason?: string; suggestedAlternative?: string }
         return {
@@ -157,7 +204,6 @@ export function parseTransaction(text: string): AgentTransaction | null {
         }
       }
     } catch {
-      // JSON.parse failed — try next strategy
       continue
     }
   }
@@ -223,14 +269,14 @@ function getLMStudioNativeBase(): string {
   return `${base}/api/v1`
 }
 
-/** In local mode, LM Studio expects the loaded model ID (e.g. deepseek-r1-distill-qwen-32b-mlx), not cloud IDs like deepseek-reasoner */
-function getLocalModelId(_model: AgentModel): string {
-  return config.localAgent.modelId
+/** In local mode, use the model ID as-is (user-configured from Uplink). Fallback to config if empty. */
+function getLocalModelId(model: string): string {
+  return model?.trim() || config.localAgent.modelId
 }
 
 /** Stream LLM via LM Studio native API — emits reasoning in real time, returns full message text */
 async function callLLMStreaming(
-  model: AgentModel,
+  model: AgentModel | string,
   systemMessage: string,
   userMessage: string,
   onThinking: (chunk: string) => void,
@@ -316,7 +362,7 @@ async function callLLMStreaming(
 
 /** Call LLM and return raw text response */
 async function callLLM(
-  model: AgentModel,
+  model: AgentModel | string,
   systemMessage: string,
   userMessage: string,
   apiKeys?: { openai?: string; anthropic?: string; deepseek?: string },
@@ -465,7 +511,8 @@ async function traceStack(optical_stack: {
 }
 
 export type AgentRunOptions = {
-  model: AgentModel
+  /** Cloud model ID or local model ID (exact LM Studio name when localMode) */
+  model: AgentModel | string
   maxRetries?: number
   onProgress?: (msg: string) => void
   /** Runtime API keys from localStorage (UplinkModal) — required for LLM calls when not in localMode */
@@ -480,6 +527,10 @@ export type AgentRunOptions = {
   onThinkingClear?: () => void
   /** AbortSignal to cancel the run (e.g. Stop button) */
   signal?: AbortSignal
+  /** Session for State-Diff (handshake once, delta thereafter). If omitted, uses full context every time. */
+  session?: AgentSessionState
+  /** Use hybrid model router (Brain-Body split). Default true. */
+  useRouter?: boolean
 }
 
 export type AgentRunResult =
@@ -492,8 +543,24 @@ export async function runAgent(
   userPrompt: string,
   options: AgentRunOptions
 ): Promise<AgentRunResult> {
-  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal } = options
+  const { model, maxRetries = 3, onProgress, onProposal, apiKeys, localMode, onThinking, onThinkingClear, signal, session, useRouter = true } = options
   const rmsThresholdUm = config.agentRmsThresholdUm
+
+  const pruned = pruneSmallTalk(userPrompt)
+  if (pruned === null) {
+    const tr = state.traceResult ?? await traceStack({
+      surfaces: state.surfaces,
+      entrancePupilDiameter: state.entrancePupilDiameter,
+      wavelengths: state.wavelengths,
+      fieldAngles: state.fieldAngles,
+      numRays: state.numRays,
+    })
+    return { success: true, surfaces: state.surfaces, transaction: { surfaceDeltas: [] }, traceResult: tr }
+  }
+  const effectivePrompt = pruned
+
+  const routedModel = ROUTING_ENABLED && useRouter ? routeModel(effectivePrompt, model as AgentModel) : model
+  if (session) resetEpisodicGoal(session, effectivePrompt.slice(0, 120))
 
   const optical_stack = {
     surfaces: state.surfaces,
@@ -514,19 +581,33 @@ export async function runAgent(
     onThinkingClear?.()
     onProgress?.(attempt === 0 ? 'Thinking...' : `Retrying (${attempt + 1}/${maxRetries})...`)
 
-    const systemMessage = buildSystemMessage(
-      { ...optical_stack, surfaces },
-      traceResult ? { ...state.traceResult!, ...traceResult } as TraceResult : state.traceResult
-    )
+    const currentTrace = traceResult ? { ...state.traceResult!, ...traceResult } as TraceResult : state.traceResult
+    const opticalMeta = {
+      entrancePupilDiameter: optical_stack.entrancePupilDiameter,
+      wavelengths: optical_stack.wavelengths,
+      fieldAngles: optical_stack.fieldAngles,
+      numRays: optical_stack.numRays,
+      focusMode: optical_stack.focusMode,
+      m2Factor: optical_stack.m2Factor,
+    }
+
+    let systemMessage: string
+    if (session) {
+      const { delta, isHandshake } = getStateDelta(session, surfaces, currentTrace, opticalMeta)
+      systemMessage = buildSystemMessageFromDelta(delta, isHandshake, session.episodic)
+    } else {
+      systemMessage = buildSystemMessage({ ...optical_stack, surfaces }, currentTrace)
+    }
 
     const errorContext =
       attempt > 0 && lastError
         ? `\n\nPrevious attempt failed: ${lastError}. Propose a different transaction to fix this.`
         : ''
+    if (session && attempt > 0) updateEpisodic(session, { failedIterations: [lastError] })
 
     let text: string
     try {
-      text = await callLLM(model, systemMessage, userPrompt + errorContext, apiKeys, localMode, onThinking, signal)
+      text = await callLLM(routedModel, systemMessage, effectivePrompt + errorContext, apiKeys, localMode, onThinking, signal)
     } catch (err) {
       const aborted = err instanceof Error && err.name === 'AbortError'
       const msg = err instanceof Error ? err.message : String(err)
@@ -540,7 +621,8 @@ export async function runAgent(
       }
     }
 
-    const transaction = parseTransaction(text)
+    const parseOpts = localMode ? { model: routedModel, promptPreview: effectivePrompt, saveThoughts: true } : undefined
+    const transaction = parseTransaction(text, surfaces, parseOpts)
     if (!transaction) {
       lastError = 'Could not parse valid transaction from LLM response'
       continue
@@ -554,12 +636,12 @@ export async function runAgent(
 
     // Accept empty surfaceDeltas as valid — agent determined no changes needed
     if (transaction.surfaceDeltas.length === 0) {
-      return {
-        success: true,
-        surfaces,
-        transaction,
-        traceResult: traceResult ?? (await traceStack({ ...optical_stack, surfaces })),
+      const tr = traceResult ?? (await traceStack({ ...optical_stack, surfaces }))
+      if (session) {
+        updateSessionAfterRequest(session, surfaces, tr)
+        updateEpisodic(session, { constraintsMet: ['No changes needed'] })
       }
+      return { success: true, surfaces, transaction, traceResult: tr }
     }
 
     lastTransaction = transaction
@@ -590,12 +672,11 @@ export async function runAgent(
       : 0
 
     if (rmsUm <= rmsThresholdUm) {
-      return {
-        success: true,
-        surfaces,
-        transaction,
-        traceResult,
+      if (session) {
+        updateSessionAfterRequest(session, surfaces, traceResult)
+        updateEpisodic(session, { constraintsMet: [`RMS ${rmsUm.toFixed(1)} μm within threshold`] })
       }
+      return { success: true, surfaces, transaction, traceResult }
     }
 
     lastError = `Design failed: RMS spot radius ${rmsUm.toFixed(1)} μm exceeds threshold ${rmsThresholdUm} μm. Try aspheric on Surface 2, different glass, or adjust curvature.`

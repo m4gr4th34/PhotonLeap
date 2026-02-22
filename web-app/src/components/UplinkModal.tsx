@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
-import { X, Link2, Eye, EyeOff, Trash2, Cpu } from 'lucide-react'
+import { X, Link2, Eye, EyeOff, Trash2, Cpu, Plus, Minus } from 'lucide-react'
 
 const PROVIDERS = [
   {
@@ -43,14 +43,18 @@ type UplinkModalProps = {
   /** Local Mode (LM Studio) — routes to localhost:1234/v1 */
   localMode?: boolean
   onLocalModeChange?: (on: boolean) => void
+  /** Local model IDs (exact names from LM Studio, e.g. deepseek-r1-distill-qwen-32b-mlx) */
+  localModels?: string[]
+  onLocalModelsChange?: (models: string[]) => void
 }
 
-export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onClearAllKeys, requiredMessage, localMode = false, onLocalModeChange }: UplinkModalProps) {
+export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onClearAllKeys, requiredMessage, localMode = false, onLocalModeChange, localModels = [], onLocalModelsChange }: UplinkModalProps) {
   const [keys, setKeys] = useState<Record<ProviderId, string>>({
     openai: initialKeys.openai ?? '',
     anthropic: initialKeys.anthropic ?? '',
     deepseek: initialKeys.deepseek ?? '',
   })
+  const [newLocalModel, setNewLocalModel] = useState('')
   const [hidden, setHidden] = useState<Record<ProviderId, boolean>>({
     openai: true,
     anthropic: true,
@@ -165,6 +169,68 @@ export function UplinkModal({ open, onClose, initialKeys = {}, onSyncKeys, onCle
                   }`}
                 />
               </button>
+            </div>
+          )}
+
+          {/* Local Models — shown when Local Mode is on */}
+          {localMode && onLocalModelsChange && (
+            <div className="mb-6 p-4 rounded-xl border border-cyan-electric/30 bg-black/20">
+              <p className="text-cyan-electric/90 text-sm font-medium mb-2">Local Models</p>
+              <p className="text-slate-400 text-xs mb-3">
+                Enter the exact model name(s) from LM Studio (e.g. deepseek-r1-distill-qwen-32b-mlx). These are sent to localhost only.
+              </p>
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={newLocalModel}
+                  onChange={(e) => setNewLocalModel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const t = newLocalModel.trim()
+                      if (t && !localModels.includes(t)) {
+                        onLocalModelsChange([...localModels, t])
+                        setNewLocalModel('')
+                      }
+                    }
+                  }}
+                  placeholder="e.g. deepseek-r1-distill-qwen-32b-mlx"
+                  className="flex-1 px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-electric/50 font-mono text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = newLocalModel.trim()
+                    if (t && !localModels.includes(t)) {
+                      onLocalModelsChange([...localModels, t])
+                      setNewLocalModel('')
+                    }
+                  }}
+                  className="px-3 py-2 rounded-lg bg-cyan-electric/20 text-cyan-electric border border-cyan-electric/40 hover:bg-cyan-electric/30 transition-colors flex items-center gap-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+              {localModels.length > 0 ? (
+                <ul className="space-y-2">
+                  {localModels.map((m) => (
+                    <li key={m} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-black/30 border border-white/10">
+                      <span className="text-slate-200 font-mono text-sm truncate">{m}</span>
+                      <button
+                        type="button"
+                        onClick={() => onLocalModelsChange(localModels.filter((x) => x !== m))}
+                        className="p-1.5 rounded text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                        aria-label={`Remove ${m}`}
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-slate-500 text-xs italic">No models added yet. Add at least one to use Local Mode.</p>
+              )}
             </div>
           )}
 

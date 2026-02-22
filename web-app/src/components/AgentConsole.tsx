@@ -8,6 +8,7 @@ import { Send, ChevronDown, ChevronRight, Loader2, CheckCircle, XCircle, KeyRoun
 import type { SystemState } from '../types/system'
 import type { AgentModel, AgentModelInfo } from '../types/agent'
 import { runAgent, buildSystemMessage } from '../lib/agentOrchestrator'
+import { createAgentSession } from '../lib/agentSession'
 import { useAgents } from '../contexts/AgentKeysContext'
 import { UplinkModal } from './UplinkModal'
 
@@ -37,11 +38,12 @@ type AgentConsoleProps = {
 }
 
 export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleProps) {
-  const { keys, setKeys, clearAllKeys, localMode, setLocalMode } = useAgents()
+  const { keys, setKeys, clearAllKeys, localMode, setLocalMode, localModels, setLocalModels } = useAgents()
   const [uplinkOpen, setUplinkOpen] = useState(false)
   const [uplinkRequiredMessage, setUplinkRequiredMessage] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState<AgentModel>('claude-3-5-sonnet-20241022')
+  const [localModel, setLocalModel] = useState<string>('')
   const [showContext, setShowContext] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<'success' | 'error' | null>(null)
@@ -53,6 +55,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const sessionRef = useRef(createAgentSession())
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
@@ -69,6 +72,16 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     thinkingContainerRef.current?.scrollTo({ top: thinkingContainerRef.current.scrollHeight, behavior: 'smooth' })
   }, [thinkingStream])
 
+  // When local models change: auto-select first if none selected, or reset if current was removed
+  useEffect(() => {
+    if (!localMode) return
+    setLocalModel((prev) => {
+      if (localModels.length === 0) return ''
+      if (!prev || !localModels.includes(prev)) return localModels[0]
+      return prev
+    })
+  }, [localMode, localModels])
+
   const optical_stack = {
     surfaces: systemState.surfaces,
     entrancePupilDiameter: systemState.entrancePupilDiameter,
@@ -81,13 +94,23 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
   const contextJson = buildSystemMessage(optical_stack, systemState.traceResult)
 
   const apiKey = getApiKeyForModel(model, keys)
-  const hasApiKey = localMode || Boolean(apiKey)
+  const hasApiKey = localMode ? localModels.length > 0 : Boolean(apiKey)
+  const effectiveModel = localMode ? localModel : model
 
   const handleSend = useCallback(async () => {
     if (!prompt.trim()) return
     if (!hasApiKey) {
-      const modelName = AGENT_MODELS.find((m) => m.id === model)?.name ?? model
-      setUplinkRequiredMessage(`Neural Link Required: Please provide an API key for ${modelName} to proceed.`)
+      if (localMode) {
+        setUplinkRequiredMessage('Local Mode: Add at least one model name in Agent Uplink (Manage keys) to proceed.')
+      } else {
+        const modelName = AGENT_MODELS.find((m) => m.id === model)?.name ?? model
+        setUplinkRequiredMessage(`Neural Link Required: Please provide an API key for ${modelName} to proceed.`)
+      }
+      setUplinkOpen(true)
+      return
+    }
+    if (localMode && !localModel) {
+      setUplinkRequiredMessage('Local Mode: Select a model from the dropdown, or add models in Agent Uplink.')
       setUplinkOpen(true)
       return
     }
@@ -102,7 +125,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
     abortControllerRef.current = ac
 
     const result = await runAgent(systemState, prompt.trim(), {
-      model,
+      model: effectiveModel as AgentModel,
       maxRetries: 3,
       onProgress: setProgress,
       apiKeys: keys.openai || keys.anthropic || keys.deepseek ? keys : undefined,
@@ -113,6 +136,8 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       onThinking: localMode ? (chunk) => setThinkingStream((prev) => prev + chunk) : undefined,
       onThinkingClear: localMode ? () => setThinkingStream('') : undefined,
       signal: ac.signal,
+      session: sessionRef.current,
+      useRouter: !localMode,
     })
 
     abortControllerRef.current = null
@@ -154,7 +179,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       if (result.localUnreachable) setLocalOfflineWarning(true)
       onSystemStateChange((prev) => ({ ...prev, ghostSurfaces: null }))
     }
-  }, [prompt, model, hasApiKey, systemState, onSystemStateChange, keys, localMode])
+  }, [prompt, model, localModel, effectiveModel, hasApiKey, systemState, onSystemStateChange, keys, localMode])
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -170,40 +195,77 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* Model selector */}
+        {/* Model selector — Cloud models vs Local models */}
         <div>
           <label className="block text-slate-400 text-xs font-medium mb-1.5">Model</label>
           <div className="relative" ref={modelDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setModelDropdownOpen((o) => !o)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-200 text-sm hover:border-cyan-electric/30 transition-colors"
-            >
-              <span>{AGENT_MODELS.find((m) => m.id === model)?.name ?? model}</span>
-              <ChevronDown className={`w-4 h-4 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {modelDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 py-1 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-10">
-                {AGENT_MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setModel(m.id)
-                      setModelDropdownOpen(false)
-                    }}
-                    className={`w-full px-3 py-2 text-left text-sm hover:bg-white/5 transition-colors ${
-                      model === m.id ? 'text-cyan-electric bg-white/5' : 'text-slate-300'
-                    }`}
-                  >
-                    <span className="font-medium">{m.name}</span>
-                    {m.role && (
-                      <span className="text-cyan-electric/70 text-xs ml-2">[{m.role}]</span>
-                    )}
-                    <span className="text-slate-500 text-xs ml-2 block mt-0.5">{m.description}</span>
-                  </button>
-                ))}
-              </div>
+            {localMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => localModels.length > 0 && setModelDropdownOpen((o) => !o)}
+                  disabled={localModels.length === 0}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-200 text-sm hover:border-cyan-electric/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <span className="font-mono truncate">
+                    {localModel || (localModels.length === 0 ? 'Add models in Uplink' : 'Select local model')}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {modelDropdownOpen && localModels.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 py-1 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-10 max-h-48 overflow-y-auto">
+                    {localModels.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          setLocalModel(m)
+                          setModelDropdownOpen(false)
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm font-mono hover:bg-white/5 transition-colors ${
+                          localModel === m ? 'text-cyan-electric bg-white/5' : 'text-slate-300'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setModelDropdownOpen((o) => !o)}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-200 text-sm hover:border-cyan-electric/30 transition-colors"
+                >
+                  <span>{AGENT_MODELS.find((m) => m.id === model)?.name ?? model}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {modelDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 py-1 bg-slate-800 border border-white/10 rounded-lg shadow-xl z-10">
+                    {AGENT_MODELS.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setModel(m.id)
+                          setModelDropdownOpen(false)
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-white/5 transition-colors ${
+                          model === m.id ? 'text-cyan-electric bg-white/5' : 'text-slate-300'
+                        }`}
+                      >
+                        <span className="font-medium">{m.name}</span>
+                        {m.role && (
+                          <span className="text-cyan-electric/70 text-xs ml-2">[{m.role}]</span>
+                        )}
+                        <span className="text-slate-500 text-xs ml-2 block mt-0.5">{m.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
           {localMode && (
@@ -227,7 +289,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
               to add an API key
             </p>
           )}
-          {hasApiKey && (
+          {(hasApiKey || localMode) && (
             <button
               type="button"
               onClick={() => {
@@ -237,7 +299,7 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
               className="text-slate-500 hover:text-cyan-electric text-xs mt-1 flex items-center gap-1"
             >
               <KeyRound className="w-3 h-3" />
-              Manage keys
+              {localMode ? 'Manage keys & models' : 'Manage keys'}
             </button>
           )}
         </div>
@@ -254,6 +316,8 @@ export function AgentConsole({ systemState, onSystemStateChange }: AgentConsoleP
           requiredMessage={uplinkRequiredMessage ?? undefined}
           localMode={localMode}
           onLocalModeChange={setLocalMode}
+          localModels={localModels}
+          onLocalModelsChange={setLocalModels}
         />
 
         {/* Local Node Offline warning — offer to switch back to Cloud */}
