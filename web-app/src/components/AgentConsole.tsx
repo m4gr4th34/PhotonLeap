@@ -68,6 +68,7 @@ export function AgentConsole({ systemState, onSystemStateChange, recentSemanticD
   const [newSessionToast, setNewSessionToast] = useState(false)
   const [newSessionJustReset, setNewSessionJustReset] = useState(false)
   const draftRef = useRef('')
+  const lastRunHadImagesRef = useRef(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const thinkingContainerRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -169,6 +170,7 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
     setImageError(null)
     setPhysicsViolations(null)
     const imagesToSend = [...imageAttachments]
+    lastRunHadImagesRef.current = imagesToSend.length > 0
     setImageAttachments([])
     setPrompt('')
     draftRef.current = ''
@@ -744,11 +746,13 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
         {errorMessage && (
           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-2">
             <p className="text-amber-500/90 text-sm font-mono">{errorMessage}</p>
-            {errorMessage === 'Could not parse valid transaction from LLM response' && localMode && (
-              <p className="text-slate-400 text-xs">
-                Many local models don&apos;t support vision. For image analysis, try a cloud model like GPT-4o or Claude.
-              </p>
-            )}
+            {errorMessage === 'Could not parse valid transaction from LLM response' &&
+              localMode &&
+              lastRunHadImagesRef.current && (
+                <p className="text-slate-400 text-xs">
+                  Many local models don&apos;t support vision. For image analysis, try a cloud model like GPT-4o or Claude.
+                </p>
+              )}
           </div>
         )}
       </div>
