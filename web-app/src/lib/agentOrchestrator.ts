@@ -120,6 +120,7 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 
 ## Constraints
 - thickness > 0, diameter > 0
+- You may add or remove surfaces.
 - If design fails physical validation, you will receive error context; propose a new transaction.`
 
 /** Optical Physics Constants — static, cacheable (~200 tokens). Never changes. */
