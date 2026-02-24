@@ -14,7 +14,7 @@ export type ValidationReport = {
   isValid: boolean
   violations: Array<{ category: string; message: string }>
 }
-import type { AgentTransaction, SurfaceDelta, AgentModel, ImageAttachment } from '../types/agent'
+import type { AgentTransaction, SurfaceDelta, CustomMaterial, AgentModel, ImageAttachment } from '../types/agent'
 import { config } from '../config'
 import { traceOpticalStack } from '../api/trace'
 import type { AgentSessionState, EpisodicMemory } from './agentSession'
@@ -90,6 +90,11 @@ const PHYSICIST_SYSTEM_PROMPT = `Role: You are the PhotonLeap Lead Physicist, an
 - Zero-Error Physics: Every design must respect the Law of Conservation of Energy and the Second Law of Thermodynamics. You cannot "create" light without a defined source.
 - Manufacturing Awareness: Favor "buildable" designs. Avoid center thicknesses <1mm or curvatures that create "knife-edges" on lens peripheries.
 
+## Structural Authority (Structural Fluidity)
+You may dynamically re-architect the optical_stack:
+- Insertion: If the Auditor identifies high-order coma or spherical aberration (e.g. high RMS spot radius), proactively insert a corrector lens (two surfaces: Glass front + Air back) into the JSON. Use surfaceDeltas with id "new" for new surfaces; include type, radius, thickness, refractiveIndex, diameter, material, description.
+- Deletion: If a lens has negligible optical power (nearly flat radii and same material as surroundings), delete it to simplify the system. Use surfaceDeltas with _delete: true and the surface id to remove.
+
 ## Optical Stack Schema (Dual-Purpose Semantic Lattice)
 Each surface has:
 - id (string, required): unique identifier — MUST match existing surface ids exactly
@@ -100,7 +105,7 @@ Each surface has:
 - thickness (mm): distance to next surface
 - refractiveIndex: n at primary wavelength
 - diameter (mm): clear aperture
-- material (string): must be from glass library
+- material (string): from glass library, or "Custom (n=X, Vd=Y)" when synthesizing (see Material Synthesis)
 - description, coating
 - effective_focal_length (mm): computed R/(n-1) for curved surfaces; null for plano
 - critical_angle (deg): TIR angle for glass→air; null for air
@@ -108,19 +113,27 @@ Each surface has:
 ## Glass Library (exact names)
 N-BK7, N-SF11, N-SF5, N-SF6, N-SF10, N-SF14, N-F2, N-SK2, Fused Silica, N-BAF10, N-LAK9, H-LAF7, Calcium Fluoride, Magnesium Fluoride, Sapphire, N-K5, N-SK16, N-BAF4, N-SF6HT, N-LAK14, N-BK10, N-SF57, N-SF66, N-SF15
 
+## Material Synthesis (no longer Library-Locked)
+If standard materials cannot satisfy chromatic requirements, you may synthesize a custom material.
+When using a custom material, include a custom_material object in your response:
+{"custom_material":{"refractive_index":1.55,"abbe_number":45,"reasoning":"Chromatic requirements needed Vd between N-BK7 and N-SF11"}}
+Use material: "Custom (n=X, Vd=Y)" for surfaces using it, where X=refractive_index, Y=abbe_number.
+
 ## Output Format
 Your response must be a valid JSON object. Do not include any text outside of the JSON structure.
 Return ONLY valid JSON. No conversational filler unless requested.
 
 Preferred (token-efficient): JSON Patch RFC 6902 — e.g. [{"op":"replace","path":"/surfaces/<id>/thickness","value":8}]
 Full format: {"surfaceDeltas":[{"id":"surf-uuid","radius":50,"thickness":5,"material":"N-BK7",...}],"reasoning":"brief physics explanation"}
+Add surface: {"surfaceDeltas":[{"id":"new","type":"Glass","radius":80,"thickness":5,"refractiveIndex":1.52,"diameter":25,"material":"N-BK7","description":"Corrector"}],...}
+Remove surface: {"surfaceDeltas":[{"id":"surf-uuid","_delete":true}],...}
+Custom material: {"surfaceDeltas":[...],"custom_material":{"refractive_index":1.55,"abbe_number":45,"reasoning":"..."},...}
 
 Optional: If design is physically impossible (e.g. TIR preventing beam exit), include:
 {"physicsViolation":true,"reason":"description","suggestedAlternative":"geometry hint","surfaceDeltas":[],"reasoning":"..."}
 
 ## Constraints
 - thickness > 0, diameter > 0
-- You may add or remove surfaces.
 - If design fails physical validation, you will receive error context; propose a new transaction.`
 
 /** Optical Physics Constants — static, cacheable (~200 tokens). Never changes. */
@@ -175,6 +188,10 @@ export function buildSystemMessage(
           gaussianBeam: traceResult.gaussianBeam,
         }
       : null,
+    designSuggestions:
+      traceResult?.performance?.rmsSpotRadius != null && traceResult.performance.rmsSpotRadius > 0.05
+        ? ['High RMS spot radius may indicate spherical aberration or coma; consider inserting a corrector lens.']
+        : undefined,
   }
   return `${ACE_CACHEABLE_PREFIX}\n\n## Current System State (JSON)\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``
 }
@@ -276,11 +293,27 @@ export function parseTransaction(text: string, surfaces: Surface[], options?: Pa
       const surfaceDeltas = (parsed as { surfaceDeltas?: unknown; surface_deltas?: unknown }).surfaceDeltas
         ?? (parsed as { surface_deltas?: unknown }).surface_deltas
       if (parsed && typeof parsed === 'object' && Array.isArray(surfaceDeltas)) {
-        const t = parsed as { reasoning?: string; physicsViolation?: boolean; reason?: string; suggestedAlternative?: string }
+        const t = parsed as {
+          reasoning?: string
+          physicsViolation?: boolean
+          reason?: string
+          suggestedAlternative?: string
+          custom_material?: unknown
+        }
+        const customMaterial = t.custom_material
+        const validCustomMaterial: CustomMaterial | undefined =
+          customMaterial &&
+          typeof customMaterial === 'object' &&
+          typeof (customMaterial as Record<string, unknown>).refractive_index === 'number' &&
+          typeof (customMaterial as Record<string, unknown>).abbe_number === 'number' &&
+          typeof (customMaterial as Record<string, unknown>).reasoning === 'string'
+            ? (customMaterial as CustomMaterial)
+            : undefined
         return {
           surfaceDeltas: surfaceDeltas.filter((d): d is SurfaceDelta =>
             d != null && typeof d === 'object' && typeof (d as Record<string, unknown>).id === 'string'
           ),
+          custom_material: validCustomMaterial,
           reasoning: t.reasoning,
           physicsViolation: t.physicsViolation,
           reason: t.reason,
@@ -294,10 +327,54 @@ export function parseTransaction(text: string, surfaces: Surface[], options?: Pa
   return null
 }
 
-/** Apply surfaceDeltas to surfaces by id. Returns new surfaces array. */
+/** Build a new Surface from an add-delta (id "new") and optional custom_material */
+function surfaceFromAddDelta(delta: SurfaceDelta, customMaterial?: CustomMaterial): Surface {
+  const cm = customMaterial
+  const mat = delta.material ?? 'N-BK7'
+  const isCustom = mat.startsWith('Custom') || (cm && mat === 'Custom')
+  const n = delta.refractiveIndex ?? (cm ? cm.refractive_index : 1.52)
+  const materialStr = cm && isCustom
+    ? `Custom (n=${cm.refractive_index}, Vd=${cm.abbe_number})`
+    : mat
+  const d = config.surfaceDefaults
+  return {
+    id: crypto.randomUUID(),
+    semanticName: delta.semanticName,
+    aiContext: delta.aiContext,
+    type: (delta.type ?? 'Glass') as 'Glass' | 'Air',
+    radius: delta.radius ?? 0,
+    thickness: delta.thickness ?? d.thickness,
+    refractiveIndex: n,
+    diameter: delta.diameter ?? d.diameter,
+    material: materialStr,
+    description: delta.description ?? 'New surface',
+    coating: delta.coating ?? 'Uncoated',
+    sellmeierCoefficients: delta.sellmeierCoefficients,
+  }
+}
+
+/** Apply surfaceDeltas to surfaces by id. Handles add (id "new"), remove (_delete), and updates. Returns new surfaces array. */
 export function applyTransaction(surfaces: Surface[], transaction: AgentTransaction): Surface[] {
-  const byId = new Map(surfaces.map((s) => [s.id, { ...s }]))
+  const customMaterial = transaction.custom_material
+  const toAdd: Surface[] = []
+  const toRemove = new Set<string>()
+
   for (const delta of transaction.surfaceDeltas) {
+    if (delta._delete) {
+      toRemove.add(delta.id)
+      continue
+    }
+    if (delta.id === 'new' || delta.id.startsWith('new')) {
+      toAdd.push(surfaceFromAddDelta(delta, customMaterial))
+      continue
+    }
+  }
+
+  let result = surfaces.filter((s) => !toRemove.has(s.id))
+  const byId = new Map(result.map((s) => [s.id, { ...s }]))
+
+  for (const delta of transaction.surfaceDeltas) {
+    if (delta._delete || delta.id === 'new' || delta.id.startsWith('new')) continue
     const surf = byId.get(delta.id)
     if (!surf) continue
     if (delta.semanticName !== undefined) surf.semanticName = delta.semanticName
@@ -306,18 +383,30 @@ export function applyTransaction(surfaces: Surface[], transaction: AgentTransact
     if (delta.thickness !== undefined) surf.thickness = delta.thickness
     if (delta.refractiveIndex !== undefined) surf.refractiveIndex = delta.refractiveIndex
     if (delta.diameter !== undefined) surf.diameter = delta.diameter
-    if (delta.material !== undefined) surf.material = delta.material
+    if (delta.material !== undefined) {
+      surf.material = delta.material
+      if (customMaterial && (delta.material.startsWith('Custom') || delta.material === 'Custom')) {
+        surf.material = `Custom (n=${customMaterial.refractive_index}, Vd=${customMaterial.abbe_number})`
+        surf.refractiveIndex = customMaterial.refractive_index
+      }
+    }
     if (delta.description !== undefined) surf.description = delta.description
     if (delta.type !== undefined) surf.type = delta.type
     if (delta.coating !== undefined) surf.coating = delta.coating
     if (delta.sellmeierCoefficients !== undefined) surf.sellmeierCoefficients = delta.sellmeierCoefficients
   }
-  return Array.from(byId.values())
+
+  result = Array.from(byId.values())
+  result.push(...toAdd)
+  return result
 }
 
 /** Physics Pre-Flight: validate transaction before UI update. Catches impossible curves, physics violations. */
 export function validateTransaction(surfaces: Surface[], transaction: AgentTransaction): { valid: boolean; error?: string } {
   const after = applyTransaction(surfaces, transaction)
+  if (after.length < 2) {
+    return { valid: false, error: 'Optical stack must have at least 2 surfaces (entrance + exit)' }
+  }
   for (const s of after) {
     if (s.thickness < 0) {
       return { valid: false, error: `Surface ${s.id} has negative thickness` }

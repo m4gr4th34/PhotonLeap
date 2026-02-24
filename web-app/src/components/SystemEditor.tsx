@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -31,6 +31,13 @@ type SystemEditorProps = {
   sensitivityBySurface?: number[] | null
   /** Emitted when user edits a surface — includes physical implication for AI context */
   onSemanticDelta?: (delta: SemanticDelta) => void
+}
+
+/** Detect if surfaces changed structurally (add/remove) vs in-place edit */
+function isStructuralChange(prevIds: string[], next: Surface[]): boolean {
+  const nextIds = next.map((s) => s.id)
+  if (prevIds.length !== nextIds.length) return true
+  return prevIds.some((id, i) => id !== nextIds[i])
 }
 
 const inputClass =
@@ -560,6 +567,23 @@ export function SystemEditor({
   const surfaces = systemState.surfaces
   const highSensitivityIndices = getHighSensitivityIndices(sensitivityBySurface)
   const [glassMaterials, setGlassMaterials] = useState<MaterialOption[]>(GLASS_LIBRARY_FALLBACK)
+
+  /** Merge library materials with AI-synthesized custom materials from surfaces for dropdown */
+  const effectiveMaterials = useMemo(() => {
+    const libNames = new Set(glassMaterials.map((m) => m.name.toLowerCase()))
+    const custom: MaterialOption[] = []
+    for (const s of surfaces) {
+      if (s.type !== 'Glass' || !s.material || s.material === 'Air') continue
+      const name = s.material
+      if (libNames.has(name.toLowerCase())) continue
+      const match = name.match(/Custom\s*\(n=([\d.]+)(?:,\s*Vd=([\d.]+))?\)/i)
+      const n = match ? Number(match[1]) : (s.refractiveIndex ?? 1.52)
+      if (!custom.some((c) => c.name === name)) {
+        custom.push({ name, n })
+      }
+    }
+    return [...glassMaterials, ...custom]
+  }, [glassMaterials, surfaces])
   const [coatings, setCoatings] = useState<CoatingOption[]>(COATINGS_FALLBACK)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [importPreview, setImportPreview] = useState<{
@@ -573,6 +597,19 @@ export function SystemEditor({
   } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const loadFileInputRef = useRef<HTMLInputElement>(null)
+  const prevSurfaceIdsRef = useRef<string[]>(surfaces.map((s) => s.id))
+
+  /** Lattice Resync: when AI adds/removes surfaces, clear selection if invalid and trigger trace */
+  useEffect(() => {
+    const prevIds = prevSurfaceIdsRef.current
+    const nextIds = surfaces.map((s) => s.id)
+    if (isStructuralChange(prevIds, surfaces)) {
+      const selectedStillExists = selectedSurfaceId && surfaces.some((s) => s.id === selectedSurfaceId)
+      if (!selectedStillExists) onSelectSurface(null)
+      onSystemStateChange((prev) => ({ ...prev, pendingTrace: true }))
+    }
+    prevSurfaceIdsRef.current = nextIds
+  }, [surfaces, selectedSurfaceId, onSelectSurface, onSystemStateChange])
 
   useEffect(() => {
     fetchMaterials().then(setGlassMaterials)
@@ -1112,11 +1149,13 @@ export function SystemEditor({
                 <td className="py-2 pr-4 overflow-visible">
                   <MaterialCombobox
                     value={s.material}
-                    materials={glassMaterials}
+                    materials={effectiveMaterials}
                     wavelengthNm={systemState.wavelengths[0] ?? 587.6}
                     fallbackN={s.refractiveIndex}
                     onChange={(material, n, sellmeierCoefficients) => {
-                      const matOpt = glassMaterials.find((m) => m.name.toLowerCase() === material.toLowerCase())
+                      const matOpt = effectiveMaterials.find((m) => m.name.toLowerCase() === material.toLowerCase())
+                      const customMatch = material.match(/Custom\s*\(n=([\d.]+)/i)
+                      const parsedN = n ?? (customMatch ? Number(customMatch[1]) : undefined)
                       const coeffs =
                         sellmeierCoefficients ??
                         (matOpt?.coefficients as { B?: number[]; C?: number[] } | undefined)
@@ -1126,7 +1165,7 @@ export function SystemEditor({
                           : undefined
                       updateSurface(s.id, {
                         material,
-                        ...(n != null && { refractiveIndex: n }),
+                        ...(parsedN != null && { refractiveIndex: parsedN }),
                         sellmeierCoefficients: sm,
                         type: material === 'Air' ? 'Air' : 'Glass',
                       }, 'material')

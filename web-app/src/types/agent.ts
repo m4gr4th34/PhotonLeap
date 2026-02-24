@@ -23,6 +23,8 @@ export type AgentBridgeCall = (
 /** Partial surface update — only specified fields are applied */
 export type SurfaceDelta = {
   id: string
+  /** When true, remove this surface from the stack */
+  _delete?: boolean
   semanticName?: string
   aiContext?: string
   radius?: number
@@ -36,9 +38,18 @@ export type SurfaceDelta = {
   sellmeierCoefficients?: { B: number[]; C: number[] }
 }
 
+/** Custom material when library glass is insufficient (Material Synthesis) */
+export type CustomMaterial = {
+  refractive_index: number
+  abbe_number: number
+  reasoning: string
+}
+
 /** Transaction returned by the LLM — set of surface changes to apply */
 export type AgentTransaction = {
   surfaceDeltas: SurfaceDelta[]
+  /** Custom material when library cannot satisfy chromatic requirements */
+  custom_material?: CustomMaterial
   /** Optional reasoning from the agent */
   reasoning?: string
   /** Agent self-flagged: design is physically impossible (e.g. TIR) */
