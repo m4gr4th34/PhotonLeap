@@ -207,6 +207,7 @@ Optional: If design is physically impossible (e.g. TIR preventing beam exit), in
 
 ## Constraints
 - thickness > 0, diameter > 0
+- You may add or remove surfaces.
 - If design fails physical validation, you will receive error context; propose a new transaction.`,Zse=`
 ## Physics Constants (immutable)
 - Snell: n₁sin(θ₁)=n₂sin(θ₂). TIR when θ ≥ arcsin(n₂/n₁).
